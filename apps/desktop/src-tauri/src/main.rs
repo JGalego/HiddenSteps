@@ -47,16 +47,33 @@ pub(crate) fn data_dir() -> std::path::PathBuf {
 
 /// A minimal stand-in for the `dirs`/`directories` crate's platform-appropriate
 /// app-data-directory resolution — written inline rather than adding a
-/// dependency for one path, and left simple deliberately: real per-platform
-/// path conventions (e.g. respecting `XDG_DATA_HOME` fully, Windows'
-/// `%APPDATA%`, macOS's `~/Library/Application Support`) are a five-minute fix
-/// once this compiles somewhere real, not an architectural question.
+/// dependency for one path. Respects each platform's real convention
+/// (`%APPDATA%` on Windows, `~/Library/Application Support` on macOS,
+/// `XDG_DATA_HOME`/`~/.local/share` on Linux) rather than falling through to a
+/// temp directory whenever `HOME` happens to be unset — which is the normal
+/// case on Windows, where this previously always landed in `%TEMP%`.
 fn dirs_next_data_dir() -> std::path::PathBuf {
-    if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
-        return std::path::PathBuf::from(xdg).join("hiddensteps");
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            return std::path::PathBuf::from(appdata).join("hiddensteps");
+        }
     }
-    if let Ok(home) = std::env::var("HOME") {
-        return std::path::PathBuf::from(home).join(".local/share/hiddensteps");
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(home) = std::env::var("HOME") {
+            return std::path::PathBuf::from(home)
+                .join("Library/Application Support/hiddensteps");
+        }
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
+            return std::path::PathBuf::from(xdg).join("hiddensteps");
+        }
+        if let Ok(home) = std::env::var("HOME") {
+            return std::path::PathBuf::from(home).join(".local/share/hiddensteps");
+        }
     }
     std::env::temp_dir().join("hiddensteps")
 }

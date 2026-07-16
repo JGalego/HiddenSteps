@@ -16,8 +16,11 @@
 //!   exclude platform code this environment can't verify, as opposed to leaving a
 //!   `todo!()` stub in its place.
 //! - **Windows** (`windows` module, `#[cfg(target_os = "windows")]`): same
-//!   situation, against Win32 (`GetForegroundWindow`, `SetWinEventHook`) and UI
-//!   Automation.
+//!   situation for its `active_window`, `clipboard`, and `shortcuts` submodules
+//!   — written against Win32 (`GetForegroundWindow`, clipboard,
+//!   `RegisterHotKey`) but not compiled or tested. `windows::file_ops` is lower
+//!   risk: it's built on the same cross-platform `notify` crate Linux's
+//!   `file_ops` uses, so it carries no hand-written Win32 FFI of its own.
 //!
 //! Two signal sources named in `docs/design/05-privacy-model.md` §1 are
 //! deliberately **not** implemented anywhere in this crate yet, and that gap is

@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.1.2 — Windows observation wired up, and a running-app capture gap closed on both platforms
+
+### Added
+
+- **Windows capture now actually runs.** `apps/desktop/src-tauri/src/observation_loop.rs` previously did nothing at all on non-Linux platforms. It now builds and polls real sources on Windows: active-window (app focus + window title), clipboard metadata (content type + byte size, never content), and file-operation metadata (path + operation type, never file content) for the user's Desktop/Documents/Downloads folders.
+- **A global-shortcut source for Windows** (`hiddensteps-observation::windows::GlobalShortcutSource`, via `RegisterHotKey`) joins the existing Linux one — written but, like its Linux counterpart, deliberately never auto-started, since grabbing a key combo is session-wide and invasive.
+- **Clipboard and file-operation capture now also run on Linux**, not just active-window — the same three sources above were implemented and tested as standalone modules since v0.1.0 but nothing in the app ever constructed or polled them until now.
+
+### Fixed
+
+- **The Windows data directory never checked `%APPDATA%`.** The database and its containing directory silently fell back to `%TEMP%\hiddensteps` on any machine where `HOME` isn't set — the normal case on Windows. Now resolves `%APPDATA%` on Windows and `~/Library/Application Support` on macOS, matching each platform's real convention.
+
+### Known limitations in this release
+
+- The three new Windows sources (active-window, clipboard, shortcuts) contain hand-written Win32 FFI written without access to a Windows toolchain — genuinely untested until CI's `windows-latest` runner compiles them for the first time. `windows::FileOperationSource` carries lower risk: it has no Win32 FFI of its own, built on the same cross-platform `notify` crate Linux already uses.
+- File-operation watching is scoped to Desktop/Documents/Downloads, not the whole home directory, to avoid exhausting OS file-watch limits on a typical developer machine.
+
 ## v0.1.1 — fixes found by actually running v0.1.0
 
 Every item here was found by hands-on use of the real v0.1.0 installers, not by review — the fastest possible feedback loop once a build exists.

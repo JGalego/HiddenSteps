@@ -4,7 +4,7 @@
 
 <h1 align="center">HiddenSteps</h1>
 
-<p align="center"><em>Watches how you work. Finds the steps you stopped noticing. Never lifts a finger.</em></p>
+<p align="center"><em>Watches how you work. Spots what you missed. Never lifts a finger.</em></p>
 
 <p align="center">
   <a href="https://github.com/JGalego/HiddenSteps/actions/workflows/ci.yml"><img src="https://github.com/JGalego/HiddenSteps/actions/workflows/ci.yml/badge.svg" alt="CI status" /></a>
