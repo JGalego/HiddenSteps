@@ -55,6 +55,7 @@ export interface OnboardingState {
 export interface DetectedRuntime {
   name: string;
   reachable: boolean;
+  models: string[];
 }
 
 export interface TestProviderConnectivityResponse {

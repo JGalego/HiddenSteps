@@ -23,6 +23,13 @@ const LEVEL_OPTIONS: Array<{ level: number; label: string; description: string }
   },
 ];
 
+// Sensible starting points for cloud providers, since we can't detect what
+// models are available without an API key. The user can type over these.
+const CLOUD_MODEL_DEFAULTS: Record<string, string> = {
+  openai: "gpt-4o-mini",
+  anthropic: "claude-sonnet-5",
+};
+
 /**
  * The 8-screen first-run flow from docs/ux/02-onboarding-flow.md, in the
  * mandated order (FR-17) — see that doc for why the order itself, not just
@@ -35,6 +42,8 @@ export function OnboardingWizard({ onComplete }: { onComplete: () => void }) {
   const [privacyLevel, setPrivacyLevel] = useState(1);
   const [runtimes, setRuntimes] = useState<DetectedRuntime[] | null>(null);
   const [providerType, setProviderType] = useState("ollama");
+  const [selectedModel, setSelectedModel] = useState("");
+  const [apiKey, setApiKey] = useState("");
   const [validation, setValidation] = useState<{ checked: boolean; ok: boolean; error: string | null }>({
     checked: false,
     ok: false,
@@ -43,22 +52,61 @@ export function OnboardingWizard({ onComplete }: { onComplete: () => void }) {
   const [consented, setConsented] = useState(false);
   const [starting, setStarting] = useState(false);
 
+  const isLocal = providerType === "ollama";
+  const detectedModels = runtimes?.find((r) => r.name === providerType)?.models ?? [];
+
   useEffect(() => {
     if (step === 5 && runtimes === null) {
       tauriBridge.getProviderDetection().then(setRuntimes);
     }
   }, [step, runtimes]);
 
+  // Real bug this fixed: onboarding used to let you reach the validation
+  // step with no model chosen at all, which silently probed a model named
+  // "default" that doesn't exist on a real Ollama instance. Pick a sensible
+  // one automatically as soon as we know what's available, rather than
+  // requiring the user to notice an empty field.
+  useEffect(() => {
+    if (selectedModel) return;
+    if (isLocal && detectedModels.length > 0) {
+      setSelectedModel(detectedModels[0]);
+    } else if (!isLocal && CLOUD_MODEL_DEFAULTS[providerType]) {
+      setSelectedModel(CLOUD_MODEL_DEFAULTS[providerType]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally only fills an *empty* field
+  }, [providerType, detectedModels]);
+
+  // A previously-passed check shouldn't silently carry over once the user
+  // changes what they're actually about to validate.
+  useEffect(() => {
+    setValidation({ checked: false, ok: false, error: null });
+  }, [providerType, selectedModel, apiKey]);
+
   const next = () => setStep((s) => Math.min(TOTAL_STEPS, s + 1));
   const back = () => setStep((s) => Math.max(1, s - 1));
 
   const runValidation = async () => {
-    const result = await tauriBridge.testProviderConnectivity({ provider_type: providerType });
+    const result = await tauriBridge.testProviderConnectivity({
+      provider_type: providerType,
+      model: selectedModel,
+      api_key: apiKey || undefined,
+    });
     setValidation({ checked: true, ok: result.ok, error: result.error });
   };
 
   const startObserving = async () => {
     setStarting(true);
+    // Real bug this fixed: onboarding used to finish without ever calling
+    // set_ai_provider, so the provider/model the user just picked and
+    // validated was never actually persisted — Settings would show "No
+    // provider configured yet." immediately after finishing onboarding.
+    await tauriBridge.setAiProvider({
+      id: providerType,
+      provider_type: providerType,
+      is_local: isLocal,
+      model_name: selectedModel,
+      api_key: apiKey || undefined,
+    });
     await tauriBridge.setPrivacyLevel(privacyLevel, ["acknowledged"]);
     await tauriBridge.completeOnboarding();
     setStarting(false);
@@ -152,17 +200,65 @@ export function OnboardingWizard({ onComplete }: { onComplete: () => void }) {
           {runtimes?.map((runtime) => (
             <p key={runtime.name}>
               {runtime.reachable ? "✓" : "✗"} {runtime.name}
-              {runtime.reachable ? " — running locally" : " — not detected"}
+              {runtime.reachable
+                ? ` — running locally (${runtime.models.length} model${runtime.models.length === 1 ? "" : "s"})`
+                : " — not detected"}
             </p>
           ))}
           <label>
             Provider:{" "}
-            <select value={providerType} onChange={(e) => setProviderType(e.target.value)}>
+            <select value={providerType} onChange={(e) => { setProviderType(e.target.value); setSelectedModel(""); }}>
               <option value="ollama">Ollama (local)</option>
               <option value="openai">OpenAI (cloud)</option>
               <option value="anthropic">Anthropic (cloud)</option>
             </select>
           </label>
+
+          {isLocal ? (
+            detectedModels.length > 0 ? (
+              <label>
+                Model:{" "}
+                <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)}>
+                  {detectedModels.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <label>
+                Model (none detected — enter one you've pulled):{" "}
+                <input
+                  type="text"
+                  value={selectedModel}
+                  onChange={(e) => setSelectedModel(e.target.value)}
+                  placeholder="e.g. qwen2.5:7b-instruct"
+                />
+              </label>
+            )
+          ) : (
+            <>
+              <label>
+                Model:{" "}
+                <input
+                  type="text"
+                  value={selectedModel}
+                  onChange={(e) => setSelectedModel(e.target.value)}
+                />
+              </label>
+              <label>
+                API key:{" "}
+                <input
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder="Sent only to this provider, stored only in your OS credential vault"
+                />
+              </label>
+            </>
+          )}
+
           <button type="button" onClick={back}>
             Back
           </button>
@@ -175,9 +271,10 @@ export function OnboardingWizard({ onComplete }: { onComplete: () => void }) {
       {step === 6 && (
         <div>
           <h1>Checking your setup…</h1>
-          <button type="button" onClick={runValidation}>
+          <button type="button" onClick={runValidation} disabled={!selectedModel.trim()}>
             Run checks
           </button>
+          {!selectedModel.trim() && <p>Choose or enter a model on the previous screen first.</p>}
           {validation.checked && (
             <p data-testid="validation-result">
               {validation.ok ? "✓ Connection OK" : `✗ ${validation.error}`}
@@ -196,7 +293,7 @@ export function OnboardingWizard({ onComplete }: { onComplete: () => void }) {
         <div>
           <h1>Ready to start</h1>
           <p>
-            Level {privacyLevel} · {providerType}
+            Level {privacyLevel} · {providerType} ({selectedModel})
           </p>
           <p>You can change any of this — or pause or delete everything — at any time.</p>
           <label>

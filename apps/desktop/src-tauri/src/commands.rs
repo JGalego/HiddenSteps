@@ -70,7 +70,18 @@ pub struct TestProviderConnectivityResponse {
 pub async fn test_provider_connectivity(
     request: TestProviderConnectivityRequest,
 ) -> Result<TestProviderConnectivityResponse, String> {
-    let model = request.model.unwrap_or_else(|| "default".to_string());
+    // Real bug, found by actually running the app: this used to fall back to
+    // a literal model named "default" when none was supplied, which doesn't
+    // exist on a real Ollama instance and fails with a confusing 404. A
+    // missing model is a real, distinct failure — surface it as one, in the
+    // same place every other connectivity failure shows up, rather than
+    // guessing a model name that was never going to work.
+    let Some(model) = request.model.filter(|m| !m.trim().is_empty()) else {
+        return Ok(TestProviderConnectivityResponse {
+            ok: false,
+            error: Some("No model selected — choose one before testing the connection.".to_string()),
+        });
+    };
     let probe = CompletionRequest {
         system: None,
         prompt: "Reply with the single word: ok".to_string(),
