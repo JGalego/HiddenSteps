@@ -3,6 +3,7 @@
 
 mod commands;
 mod observation_loop;
+mod recommendation_loop;
 mod state;
 
 use std::sync::Arc;
@@ -62,8 +63,7 @@ fn dirs_next_data_dir() -> std::path::PathBuf {
     #[cfg(target_os = "macos")]
     {
         if let Ok(home) = std::env::var("HOME") {
-            return std::path::PathBuf::from(home)
-                .join("Library/Application Support/hiddensteps");
+            return std::path::PathBuf::from(home).join("Library/Application Support/hiddensteps");
         }
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
@@ -89,15 +89,33 @@ fn main() {
             .expect("failed to open the encrypted HiddenSteps store"),
     );
 
+    // Consent granted through `commands::set_cloud_consent` is persisted as a
+    // setting (there being no dedicated schema for it — see `state::AppState`'s
+    // doc comment) and re-applied to a fresh, in-memory `DispatchGate` here on
+    // every launch; the gate itself never survives a restart as an object.
+    let mut gate = DispatchGate::new();
+    if let Ok(Some(serde_json::Value::Bool(true))) =
+        store.get_setting(commands::CLOUD_CONSENT_SETTING_KEY)
+    {
+        gate.grant_general_cloud_consent();
+    }
+
     let app_state = state::AppState {
-        store,
-        gate: Mutex::new(DispatchGate::new()),
+        store: store.clone(),
+        gate: Mutex::new(gate),
         enterprise_policy: Mutex::new(EnterprisePolicy::default()),
         observation_task: Mutex::new(None),
     };
 
     tauri::Builder::default()
         .manage(app_state)
+        .setup(move |app| {
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                recommendation_loop::run(handle, store).await;
+            });
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::get_onboarding_state,
             commands::get_provider_detection,
@@ -117,6 +135,8 @@ fn main() {
             commands::list_recommendations,
             commands::get_recommendation_detail,
             commands::set_recommendation_status,
+            commands::get_cloud_consent,
+            commands::set_cloud_consent,
             commands::get_settings,
             commands::update_settings,
             commands::get_audit_log,

@@ -8,7 +8,8 @@ use time::OffsetDateTime;
 #[derive(Debug, Clone, PartialEq)]
 pub struct DetectedPattern {
     /// The ordered sequence of action keys that recurred, e.g.
-    /// `["jira:app_action_event", "os:clipboard_metadata", "excel:app_action_event"]`.
+    /// `["app_focus_change:slack.exe", "clipboard_metadata:text/plain",
+    /// "app_focus_change:excel.exe"]`.
     pub signature: Vec<String>,
     pub occurrence_count: u32,
     pub first_seen_at: OffsetDateTime,
@@ -18,6 +19,13 @@ pub struct DetectedPattern {
     /// traceability ("what observations contributed?") once these are linked via
     /// `EventStore::link_pattern_events`.
     pub contributing_event_ids: Vec<i64>,
+    /// Whether this signature includes a signal type `docs/design/05-privacy-
+    /// model.md`'s cloud-eligibility rules (mirrored in
+    /// `hiddensteps_privacy_engine::gate::cloud_eligibility`) treat as a verbatim
+    /// string (currently: a browser domain) rather than shape-only metadata —
+    /// callers dispatching this pattern to a cloud `LlmProvider` must gate on
+    /// this, same as any other verbatim content class.
+    pub contains_verbatim_strings: bool,
 }
 
 /// Finds repeated, contiguous action-sequence shapes across an event history via
@@ -114,6 +122,7 @@ impl PatternDetector {
                     .iter()
                     .flat_map(|o| o.slice.iter().filter_map(|e| e.id))
                     .collect();
+                let contains_verbatim_strings = signature_contains_verbatim(&signature);
 
                 DetectedPattern {
                     signature,
@@ -122,20 +131,93 @@ impl PatternDetector {
                     last_seen_at,
                     estimated_minutes_per_occurrence,
                     contributing_event_ids,
+                    contains_verbatim_strings,
                 }
             })
             .collect()
     }
 }
 
-/// The structural identity of an event for pattern-matching purposes — deliberately
-/// excludes `summary` content (see this module's doc comment).
+/// The structural identity of an event for pattern-matching purposes: which
+/// signal type fired, and — where one exists — a low-cardinality *subject*
+/// distinguishing *which* app/format/operation it was about. Plain
+/// `signal_type` alone (this module's original identity) can never tell "you
+/// keep switching to Slack" apart from "you keep switching to Excel", since
+/// every `AppFocusChange` event looks identical without it; `source_id` can't
+/// fill that gap either — it identifies the *capture module* (e.g.
+/// `windows.active_window`), which is the same for every app a given platform's
+/// single active-window watcher ever reports on, not the app itself.
+///
+/// Window titles and Level-4 deep-mode content (OCR text, screenshots,
+/// accessibility trees) deliberately have no subject here and fall back to
+/// `signal_type` alone: titles are too high-cardinality to ever meaningfully
+/// repeat verbatim, and deep-mode content is too sensitive to fold into a
+/// pattern signature that may end up in an LLM prompt.
 pub fn action_key(event: &EventSummary) -> String {
-    format!(
-        "{}:{}",
-        event.source_id,
-        signal_type_label(event.signal_type)
-    )
+    match subject(event) {
+        Some(subject) => format!("{}:{}", signal_type_label(event.signal_type), subject.value),
+        None => format!(
+            "{}:{}",
+            event.source_id,
+            signal_type_label(event.signal_type)
+        ),
+    }
+}
+
+struct Subject {
+    value: String,
+}
+
+/// Pulls the identifying value out of an event's summary fields (set by
+/// `hiddensteps_pipeline::classify`), per signal type. Field names here must
+/// match `classify`'s `fields` list for that `CapturedPayload` variant exactly.
+fn subject(event: &EventSummary) -> Option<Subject> {
+    use hiddensteps_domain::SignalType::*;
+    let obj = event.summary.as_object()?;
+    let str_field = |name: &str| obj.get(name).and_then(|v| v.as_str());
+
+    match event.signal_type {
+        AppFocusChange => str_field("app").map(|app| Subject {
+            value: app.to_string(),
+        }),
+        ShortcutUsed => str_field("shortcut").map(|shortcut| Subject {
+            value: shortcut.to_string(),
+        }),
+        BrowserDomainVisited => str_field("domain").map(|domain| Subject {
+            value: domain.to_string(),
+        }),
+        ClipboardMetadata => str_field("content_type").map(|content_type| Subject {
+            value: content_type.to_string(),
+        }),
+        FileOperationMetadata => {
+            let operation = str_field("operation")?;
+            // Deliberately the extension, never the path itself — a full path
+            // is exactly the kind of verbatim, personally-identifying string
+            // (project/folder names) this signature should not carry, and is
+            // high-cardinality enough to rarely repeat anyway.
+            let extension = str_field("path")
+                .and_then(|path| std::path::Path::new(path).extension())
+                .and_then(|ext| ext.to_str())
+                .unwrap_or("no_extension");
+            Some(Subject {
+                value: format!("{operation}:{extension}"),
+            })
+        }
+        WindowTitle | AppActionEvent | OcrText | Screenshot | AccessibilityTree => None,
+    }
+}
+
+/// Whether any position in a signature is a signal type
+/// `hiddensteps_privacy_engine::gate::cloud_eligibility` treats as carrying a
+/// verbatim string — currently just `browser_domain_visited`, the one subject
+/// type above sourced from exactly the kind of value (a domain) that crate's
+/// doc comment names. `signal_type_label` is a stable, closed set, so matching
+/// on the label prefix here (rather than re-deriving `Subject`s) is exact, not
+/// a heuristic.
+fn signature_contains_verbatim(signature: &[String]) -> bool {
+    signature
+        .iter()
+        .any(|key| key.starts_with("browser_domain_visited:"))
 }
 
 fn signal_type_label(signal_type: hiddensteps_domain::SignalType) -> &'static str {
@@ -266,5 +348,85 @@ mod tests {
         let mut b = event_at(1, "jira", SignalType::AppActionEvent, 2);
         b.summary = serde_json::json!({"ticket": "PROJ-999"});
         assert_eq!(action_key(&a), action_key(&b));
+    }
+
+    #[test]
+    fn app_focus_change_action_key_distinguishes_which_app_not_just_the_capture_module() {
+        // Both events come from the same capture module (same source_id, as a
+        // real single active-window watcher would report for every app) --
+        // only the summary's "app" field differs, the way it would in
+        // production between two real app switches.
+        let mut slack = event_at(0, "windows.active_window", SignalType::AppFocusChange, 1);
+        slack.summary = serde_json::json!({"app": "slack.exe"});
+        let mut excel = event_at(1, "windows.active_window", SignalType::AppFocusChange, 2);
+        excel.summary = serde_json::json!({"app": "excel.exe"});
+
+        assert_ne!(action_key(&slack), action_key(&excel));
+        assert_eq!(action_key(&slack), "app_focus_change:slack.exe");
+    }
+
+    #[test]
+    fn app_focus_change_with_no_app_field_falls_back_to_source_id() {
+        let event = event_at(0, "windows.active_window", SignalType::AppFocusChange, 1);
+        assert_eq!(action_key(&event), "windows.active_window:app_focus_change");
+    }
+
+    #[test]
+    fn file_operation_action_key_uses_extension_not_the_full_path() {
+        let mut event = event_at(
+            0,
+            "linux.file_operations",
+            SignalType::FileOperationMetadata,
+            1,
+        );
+        event.summary = serde_json::json!({"path": "/home/alice/secret-project/report.xlsx", "operation": "create"});
+        let key = action_key(&event);
+        assert_eq!(key, "file_operation_metadata:create:xlsx");
+        assert!(!key.contains("secret-project"));
+        assert!(!key.contains("/home/alice"));
+    }
+
+    #[test]
+    fn browser_domain_pattern_is_flagged_as_containing_verbatim_strings() {
+        let events: Vec<EventSummary> = [0, 100, 200]
+            .into_iter()
+            .enumerate()
+            .map(|(index, start)| {
+                let mut event = event_at(
+                    start,
+                    "linux.browser",
+                    SignalType::BrowserDomainVisited,
+                    index as i64 + 1,
+                );
+                event.summary = serde_json::json!({"domain": "example.com"});
+                event
+            })
+            .collect();
+        let detector = PatternDetector::new(1..=1, 3);
+        let detected = detector.detect(&events);
+        assert_eq!(detected.len(), 1);
+        assert!(detected[0].contains_verbatim_strings);
+    }
+
+    #[test]
+    fn app_focus_change_pattern_is_not_flagged_as_verbatim() {
+        let events: Vec<EventSummary> = [0, 100, 200]
+            .into_iter()
+            .enumerate()
+            .map(|(index, start)| {
+                let mut event = event_at(
+                    start,
+                    "windows.active_window",
+                    SignalType::AppFocusChange,
+                    index as i64 + 1,
+                );
+                event.summary = serde_json::json!({"app": "slack.exe"});
+                event
+            })
+            .collect();
+        let detector = PatternDetector::new(1..=1, 3);
+        let detected = detector.detect(&events);
+        assert_eq!(detected.len(), 1);
+        assert!(!detected[0].contains_verbatim_strings);
     }
 }

@@ -9,6 +9,8 @@ vi.mock("../tauriBridge", () => ({
     getObservationStatus: vi.fn(),
     listLlmProviders: vi.fn(),
     setPrivacyLevel: vi.fn(),
+    getCloudConsent: vi.fn(),
+    setCloudConsent: vi.fn(),
   },
 }));
 
@@ -35,6 +37,8 @@ describe("SettingsPage", () => {
       },
     ]);
     mockedBridge.setPrivacyLevel.mockResolvedValue({ effective_level: 2 });
+    mockedBridge.getCloudConsent.mockResolvedValue(false);
+    mockedBridge.setCloudConsent.mockResolvedValue(true);
   });
 
   it("shows the current privacy level and the active provider", async () => {
@@ -67,5 +71,32 @@ describe("SettingsPage", () => {
     mockedBridge.listLlmProviders.mockResolvedValue([]);
     render(<SettingsPage />);
     expect(await screen.findByText("No provider configured yet.")).toBeInTheDocument();
+  });
+
+  it("does not show the cloud-consent toggle when every provider is local", async () => {
+    render(<SettingsPage />);
+    await screen.findByTestId("provider-list");
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+  });
+
+  it("shows the cloud-consent toggle when a cloud provider is configured, and toggling it calls set_cloud_consent", async () => {
+    const user = userEvent.setup();
+    mockedBridge.listLlmProviders.mockResolvedValue([
+      {
+        id: "anthropic-main",
+        provider_type: "anthropic",
+        is_local: false,
+        model_name: "claude-sonnet-5",
+        endpoint: null,
+        vault_key_ref: "provider-key-anthropic-main",
+        active: true,
+      },
+    ]);
+    render(<SettingsPage />);
+    const checkbox = await screen.findByRole("checkbox");
+    expect(checkbox).not.toBeChecked();
+
+    await user.click(checkbox);
+    expect(mockedBridge.setCloudConsent).toHaveBeenCalledWith(true);
   });
 });

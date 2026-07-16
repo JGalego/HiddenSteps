@@ -215,6 +215,7 @@ mod tests {
             last_seen_at: OffsetDateTime::now_utc(),
             estimated_minutes_per_occurrence: 21.3,
             contributing_event_ids: (1..=62).collect(),
+            contains_verbatim_strings: false,
         }
     }
 

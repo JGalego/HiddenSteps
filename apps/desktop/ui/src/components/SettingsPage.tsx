@@ -12,16 +12,19 @@ import { tauriBridge, type LlmProviderConfig, type PrivacyState } from "../tauri
 export function SettingsPage() {
   const [status, setStatus] = useState<PrivacyState | null>(null);
   const [providers, setProviders] = useState<LlmProviderConfig[]>([]);
+  const [cloudConsent, setCloudConsentState] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
-      const [nextStatus, nextProviders] = await Promise.all([
+      const [nextStatus, nextProviders, nextCloudConsent] = await Promise.all([
         tauriBridge.getObservationStatus(),
         tauriBridge.listLlmProviders(),
+        tauriBridge.getCloudConsent(),
       ]);
       setStatus(nextStatus);
       setProviders(nextProviders);
+      setCloudConsentState(nextCloudConsent);
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -36,6 +39,13 @@ export function SettingsPage() {
     await tauriBridge.setPrivacyLevel(level, ["acknowledged"]);
     await refresh();
   };
+
+  const toggleCloudConsent = async () => {
+    await tauriBridge.setCloudConsent(!cloudConsent);
+    await refresh();
+  };
+
+  const hasCloudProvider = providers.some((p) => !p.is_local);
 
   return (
     <section aria-label="Settings">
@@ -84,6 +94,20 @@ export function SettingsPage() {
             </li>
           ))}
         </ul>
+        {hasCloudProvider && (
+          <p className="cloud-consent-toggle">
+            <label>
+              <input
+                type="checkbox"
+                checked={cloudConsent}
+                onChange={toggleCloudConsent}
+              />{" "}
+              Allow sending pattern summaries to your cloud AI provider for
+              recommendations. Without this, recommendations are only
+              generated using a local provider.
+            </label>
+          </p>
+        )}
       </div>
     </section>
   );

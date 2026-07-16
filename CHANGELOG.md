@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.1.3 — Recommendations were never actually generated; now they are
+
+Found the same hands-on way as the last two releases: hundreds of events were captured, "Detected patterns: 0" and "Recommendations: 0" never moved. The cause wasn't "needs more data" — nothing in the running app ever invoked pattern detection or recommendation synthesis at all, on either platform.
+
+### Added
+
+- **A periodic background sweep** (`recommendation_loop.rs`, every 5 minutes) that actually runs `hiddensteps-patterns`' deterministic detector and, for newly-discovered patterns, `hiddensteps-recommendations`' LLM synthesis over stored events — both crates were fully implemented and tested since v0.1.0 but nothing ever called either one.
+- **Cloud-dispatch consent, for real.** Recommendation synthesis calls an LLM; for a cloud provider, that's gated through the existing `DispatchGate`/privacy-dispatch architecture, which until now was constructed and never read anywhere. A new Settings toggle ("Allow sending pattern summaries to your cloud AI provider") grants/revokes general cloud consent, persisted and re-applied to the gate on every launch. Local providers are unaffected — they were never gated.
+
+### Fixed
+
+- **Pattern detection couldn't tell apps apart.** The action-key identity pattern detection matched on was `{capture_module_id}:{signal_type}` — e.g. every `windows.active_window` app switch produced the identical key regardless of which app you switched to, since the capture module's own name doesn't vary per app. Detection now derives a real per-signal-type subject from the event summary (the app identifier, the clipboard content type, the shortcut label, an operation+extension for file events, a domain for browser events) where one exists, so a detected pattern is actually about *which* apps/formats recur — "you keep switching Slack → Excel" — not just which capture modules fired near each other.
+- File paths and window titles are deliberately excluded from this — too identifying (paths) or too high-cardinality to ever repeat (titles) to belong in a pattern signature that may reach an LLM prompt. Browser domains are included but flagged as containing a verbatim string, gating them the same as any other cloud-dispatch-sensitive content.
+
 ## v0.1.2 — Windows observation wired up, and a running-app capture gap closed on both platforms
 
 ### Added

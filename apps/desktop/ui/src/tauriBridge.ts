@@ -160,4 +160,9 @@ export const tauriBridge = {
     invoke("set_recommendation_status", {
       request: { id, status, dismissal_reason: dismissalReason },
     }),
+
+  getCloudConsent: (): Promise<boolean> => invoke("get_cloud_consent"),
+
+  setCloudConsent: (granted: boolean): Promise<boolean> =>
+    invoke("set_cloud_consent", { granted }),
 };

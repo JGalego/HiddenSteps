@@ -39,7 +39,8 @@ pub async fn run(app: AppHandle, store: Arc<SqlCipherEventStore>) {
             Ok(state) => state,
             Err(_) => break,
         };
-        if !privacy_state.observation_active || privacy_state.current_level == PrivacyLevel::Manual {
+        if !privacy_state.observation_active || privacy_state.current_level == PrivacyLevel::Manual
+        {
             tokio::time::sleep(Duration::from_secs(2)).await;
             continue;
         }
@@ -48,7 +49,11 @@ pub async fn run(app: AppHandle, store: Arc<SqlCipherEventStore>) {
             match source.poll() {
                 Ok(signals) => {
                     for signal in signals {
-                        match pipeline.process(signal, privacy_state.current_level, OffsetDateTime::now_utc()) {
+                        match pipeline.process(
+                            signal,
+                            privacy_state.current_level,
+                            OffsetDateTime::now_utc(),
+                        ) {
                             PipelineOutcome::Summarized(event) => {
                                 if let Ok(id) = store.insert_event_summary(&event) {
                                     let mut with_id = event;
@@ -136,10 +141,14 @@ fn build_sources(app: &AppHandle) -> Vec<Box<dyn ObservationSource>> {
 
 #[cfg(target_os = "windows")]
 fn build_sources(app: &AppHandle) -> Vec<Box<dyn ObservationSource>> {
-    use hiddensteps_observation::windows::{ActiveWindowSource, ClipboardMetadataSource, FileOperationSource};
+    use hiddensteps_observation::windows::{
+        ActiveWindowSource, ClipboardMetadataSource, FileOperationSource,
+    };
 
-    let mut sources: Vec<Box<dyn ObservationSource>> =
-        vec![Box::new(ActiveWindowSource::new()), Box::new(ClipboardMetadataSource::new())];
+    let mut sources: Vec<Box<dyn ObservationSource>> = vec![
+        Box::new(ActiveWindowSource::new()),
+        Box::new(ClipboardMetadataSource::new()),
+    ];
 
     for dir in watched_directories() {
         match FileOperationSource::watch(&dir) {

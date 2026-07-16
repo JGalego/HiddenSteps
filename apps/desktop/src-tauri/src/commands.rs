@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use hiddensteps_domain::{AuditActor, AuditEntry, LlmProviderConfig, PrivacyLevel, PrivacyState};
 use hiddensteps_llm_provider::{
-    default_candidates, detect, AnthropicProvider, CompletionRequest, DetectedRuntime,
-    LlmProvider, OllamaProvider, OpenAiCompatibleProvider,
+    default_candidates, detect, AnthropicProvider, CompletionRequest, DetectedRuntime, LlmProvider,
+    OllamaProvider, OpenAiCompatibleProvider,
 };
 use hiddensteps_security::SecretStore;
 use serde::{Deserialize, Serialize};
@@ -20,6 +20,12 @@ use crate::state::AppState;
 fn to_err(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
+
+/// The settings-table key general cloud-dispatch consent is persisted under —
+/// there's no dedicated schema column for it (see `state::AppState`'s doc
+/// comment on why the in-memory `DispatchGate` is rebuilt from this at every
+/// launch rather than carried across restarts as separate state).
+pub const CLOUD_CONSENT_SETTING_KEY: &str = "cloud_consent_general";
 
 // --- Onboarding & setup ---
 
@@ -79,7 +85,9 @@ pub async fn test_provider_connectivity(
     let Some(model) = request.model.filter(|m| !m.trim().is_empty()) else {
         return Ok(TestProviderConnectivityResponse {
             ok: false,
-            error: Some("No model selected — choose one before testing the connection.".to_string()),
+            error: Some(
+                "No model selected — choose one before testing the connection.".to_string(),
+            ),
         });
     };
     let probe = CompletionRequest {
@@ -91,11 +99,15 @@ pub async fn test_provider_connectivity(
 
     let result = match request.provider_type.as_str() {
         "ollama" => {
-            let endpoint = request.endpoint.unwrap_or_else(|| "http://localhost:11434".to_string());
+            let endpoint = request
+                .endpoint
+                .unwrap_or_else(|| "http://localhost:11434".to_string());
             OllamaProvider::new(endpoint, model).complete(probe).await
         }
         "anthropic" => {
-            let endpoint = request.endpoint.unwrap_or_else(|| "https://api.anthropic.com".to_string());
+            let endpoint = request
+                .endpoint
+                .unwrap_or_else(|| "https://api.anthropic.com".to_string());
             AnthropicProvider::new(endpoint, request.api_key.unwrap_or_default(), model)
                 .complete(probe)
                 .await
@@ -125,7 +137,10 @@ pub async fn test_provider_connectivity(
     };
 
     match result {
-        Ok(_) => Ok(TestProviderConnectivityResponse { ok: true, error: None }),
+        Ok(_) => Ok(TestProviderConnectivityResponse {
+            ok: true,
+            error: None,
+        }),
         Err(e) => Ok(TestProviderConnectivityResponse {
             ok: false,
             error: Some(e.to_string()),
@@ -134,7 +149,9 @@ pub async fn test_provider_connectivity(
 }
 
 #[tauri::command]
-pub async fn list_llm_providers(state: State<'_, AppState>) -> Result<Vec<LlmProviderConfig>, String> {
+pub async fn list_llm_providers(
+    state: State<'_, AppState>,
+) -> Result<Vec<LlmProviderConfig>, String> {
     state.store.list_llm_providers().map_err(to_err)
 }
 
@@ -181,7 +198,10 @@ pub async fn set_ai_provider(
             active: false,
         })
         .map_err(to_err)?;
-    state.store.set_active_llm_provider(&request.id).map_err(to_err)?;
+    state
+        .store
+        .set_active_llm_provider(&request.id)
+        .map_err(to_err)?;
 
     state
         .store
@@ -232,7 +252,10 @@ pub async fn set_privacy_level(
 }
 
 #[tauri::command]
-pub async fn complete_onboarding(app: AppHandle, state: State<'_, AppState>) -> Result<bool, String> {
+pub async fn complete_onboarding(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
     let mut current = state.store.get_privacy_state().map_err(to_err)?;
     current.observation_active = true;
     current.updated_at = OffsetDateTime::now_utc();
@@ -249,7 +272,8 @@ pub async fn complete_onboarding(app: AppHandle, state: State<'_, AppState>) -> 
 
     let store = state.store.clone();
     let app_for_task = app.clone();
-    let handle = tokio::spawn(async move { crate::observation_loop::run(app_for_task, store).await });
+    let handle =
+        tokio::spawn(async move { crate::observation_loop::run(app_for_task, store).await });
     *state.observation_task.lock().await = Some(handle);
 
     let _ = app.emit(
@@ -313,7 +337,10 @@ pub async fn get_recent_events(
 }
 
 #[tauri::command]
-pub async fn delete_events(state: State<'_, AppState>, event_ids: Vec<i64>) -> Result<usize, String> {
+pub async fn delete_events(
+    state: State<'_, AppState>,
+    event_ids: Vec<i64>,
+) -> Result<usize, String> {
     let count = state.store.delete_events(&event_ids).map_err(to_err)?;
     state
         .store
@@ -358,7 +385,9 @@ pub async fn list_patterns(
     state: State<'_, AppState>,
     status_filter: Option<String>,
 ) -> Result<Vec<hiddensteps_domain::Pattern>, String> {
-    let filter = status_filter.map(|s| parse_pattern_status(&s)).transpose()?;
+    let filter = status_filter
+        .map(|s| parse_pattern_status(&s))
+        .transpose()?;
     state.store.list_patterns(filter).map_err(to_err)
 }
 
@@ -367,7 +396,9 @@ pub async fn list_recommendations(
     state: State<'_, AppState>,
     status_filter: Option<String>,
 ) -> Result<Vec<hiddensteps_domain::Recommendation>, String> {
-    let filter = status_filter.map(|s| parse_recommendation_status(&s)).transpose()?;
+    let filter = status_filter
+        .map(|s| parse_recommendation_status(&s))
+        .transpose()?;
     state.store.list_recommendations(filter).map_err(to_err)
 }
 
@@ -418,6 +449,49 @@ pub async fn set_recommendation_status(
         .set_recommendation_status(request.id, status, request.dismissal_reason.as_deref())
         .map_err(to_err)?;
     Ok(true)
+}
+
+// --- Cloud dispatch consent ---
+
+/// Whether the user has granted general consent for pattern summaries to be
+/// sent to a *cloud* `LlmProvider` for recommendation synthesis — checked by
+/// `recommendation_loop`'s privacy gate before every cloud dispatch (ADR-0004).
+/// Local providers never consult this at all; it only ever gates cloud calls.
+#[tauri::command]
+pub async fn get_cloud_consent(state: State<'_, AppState>) -> Result<bool, String> {
+    Ok(matches!(
+        state
+            .store
+            .get_setting(CLOUD_CONSENT_SETTING_KEY)
+            .map_err(to_err)?,
+        Some(serde_json::Value::Bool(true))
+    ))
+}
+
+#[tauri::command]
+pub async fn set_cloud_consent(state: State<'_, AppState>, granted: bool) -> Result<bool, String> {
+    state
+        .store
+        .set_setting(CLOUD_CONSENT_SETTING_KEY, &serde_json::Value::Bool(granted))
+        .map_err(to_err)?;
+
+    let mut gate = state.gate.lock().await;
+    if granted {
+        gate.grant_general_cloud_consent();
+    } else {
+        gate.revoke_general_cloud_consent();
+    }
+    drop(gate);
+
+    state
+        .store
+        .append_audit_entry(&AuditEntry::new(
+            AuditActor::User,
+            "cloud_consent_changed",
+            serde_json::json!({ "granted": granted }),
+        ))
+        .map_err(to_err)?;
+    Ok(granted)
 }
 
 // --- Settings ---
@@ -502,7 +576,9 @@ fn parse_pattern_status(value: &str) -> Result<hiddensteps_domain::PatternStatus
     }
 }
 
-fn parse_recommendation_status(value: &str) -> Result<hiddensteps_domain::RecommendationStatus, String> {
+fn parse_recommendation_status(
+    value: &str,
+) -> Result<hiddensteps_domain::RecommendationStatus, String> {
     match value {
         "suggested" => Ok(hiddensteps_domain::RecommendationStatus::Suggested),
         "implemented" => Ok(hiddensteps_domain::RecommendationStatus::Implemented),
