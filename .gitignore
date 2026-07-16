@@ -5,6 +5,7 @@ Cargo.lock.bak
 # Tauri/Node (future UI work)
 node_modules/
 dist/
+*.tsbuildinfo
 
 # Editor/OS cruft
 .DS_Store

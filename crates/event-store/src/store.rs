@@ -2,7 +2,8 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use hiddensteps_domain::{
-    AuditActor, AuditEntry, EventSummary, PrivacyLevel, PrivacyState, SignalType,
+    Alternative, AuditActor, AuditEntry, EventSummary, Level, Pattern, PatternStatus, PrivacyLevel,
+    PrivacyState, Recommendation, RecommendationCategory, RecommendationStatus, SignalType,
 };
 use rusqlite::{params, Connection, OptionalExtension};
 use time::OffsetDateTime;
@@ -215,6 +216,7 @@ impl SqlCipherEventStore {
         let conn = self.conn.lock().expect("event store mutex poisoned");
         const TABLES: &[&str] = &[
             "pattern_events",
+            "pattern_embeddings",
             "workflow_edges",
             "workflow_nodes",
             "recommendations",
@@ -248,11 +250,255 @@ impl SqlCipherEventStore {
         let events = self.list_recent_events(i64::MAX)?;
         let audit_log = self.list_audit_log(i64::MAX)?;
         let privacy_state = self.get_privacy_state()?;
+        let patterns = self.list_patterns(None)?;
+        let recommendations = self.list_recommendations(None)?;
         Ok(serde_json::json!({
             "privacy_state": privacy_state,
             "event_summaries": events,
             "audit_log": audit_log,
+            "patterns": patterns,
+            "recommendations": recommendations,
         }))
+    }
+
+    // --- patterns (Pattern Detection's Layer 1 output, ADR-0010) ---
+
+    pub fn insert_pattern(&self, pattern: &Pattern) -> Result<i64, EventStoreError> {
+        let conn = self.conn.lock().expect("event store mutex poisoned");
+        conn.execute(
+            "INSERT INTO patterns
+                (first_seen_at, last_seen_at, occurrence_count,
+                 estimated_minutes_per_occurrence, sequence_signature_json, status)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                to_rfc3339(pattern.first_seen_at),
+                to_rfc3339(pattern.last_seen_at),
+                pattern.occurrence_count,
+                pattern.estimated_minutes_per_occurrence,
+                serde_json::to_string(&pattern.sequence_signature)?,
+                pattern_status_to_str(pattern.status),
+            ],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    /// Updates an existing pattern's rolling stats (occurrence count, last-seen
+    /// time, estimate) as new matching events accumulate — the pattern's
+    /// identity/signature does not change, only these fields.
+    pub fn update_pattern_stats(
+        &self,
+        pattern_id: i64,
+        last_seen_at: OffsetDateTime,
+        occurrence_count: u32,
+        estimated_minutes_per_occurrence: Option<f64>,
+    ) -> Result<(), EventStoreError> {
+        let conn = self.conn.lock().expect("event store mutex poisoned");
+        conn.execute(
+            "UPDATE patterns
+             SET last_seen_at = ?1, occurrence_count = ?2, estimated_minutes_per_occurrence = ?3
+             WHERE id = ?4",
+            params![
+                to_rfc3339(last_seen_at),
+                occurrence_count,
+                estimated_minutes_per_occurrence,
+                pattern_id,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_pattern_status(
+        &self,
+        pattern_id: i64,
+        status: PatternStatus,
+    ) -> Result<(), EventStoreError> {
+        let conn = self.conn.lock().expect("event store mutex poisoned");
+        conn.execute(
+            "UPDATE patterns SET status = ?1 WHERE id = ?2",
+            params![pattern_status_to_str(status), pattern_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_patterns(
+        &self,
+        status_filter: Option<PatternStatus>,
+    ) -> Result<Vec<Pattern>, EventStoreError> {
+        let conn = self.conn.lock().expect("event store mutex poisoned");
+        let base = "SELECT id, first_seen_at, last_seen_at, occurrence_count,
+                    estimated_minutes_per_occurrence, sequence_signature_json, status
+             FROM patterns";
+        let (sql, filter): (String, Option<&'static str>) = match status_filter {
+            Some(status) => (
+                format!("{base} WHERE status = ?1"),
+                Some(pattern_status_to_str(status)),
+            ),
+            None => (base.to_string(), None),
+        };
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = match filter {
+            Some(status) => stmt.query_map(params![status], row_to_pattern)?,
+            None => stmt.query_map([], row_to_pattern)?,
+        };
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(EventStoreError::from)
+    }
+
+    /// Links a pattern to the specific event summaries that contributed to
+    /// detecting it — the storage layer behind FR-13's "what observations
+    /// contributed?" traceability requirement.
+    pub fn link_pattern_events(
+        &self,
+        pattern_id: i64,
+        event_ids: &[i64],
+    ) -> Result<(), EventStoreError> {
+        let conn = self.conn.lock().expect("event store mutex poisoned");
+        for event_id in event_ids {
+            conn.execute(
+                "INSERT OR IGNORE INTO pattern_events (pattern_id, event_id) VALUES (?1, ?2)",
+                params![pattern_id, event_id],
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn list_pattern_events(
+        &self,
+        pattern_id: i64,
+    ) -> Result<Vec<EventSummary>, EventStoreError> {
+        let conn = self.conn.lock().expect("event store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT e.id, e.occurred_at, e.source_id, e.signal_type, e.privacy_level_at_capture,
+                    e.summary_json, e.is_deep_mode, e.ttl_expires_at
+             FROM event_summaries e
+             JOIN pattern_events pe ON pe.event_id = e.id
+             WHERE pe.pattern_id = ?1
+             ORDER BY e.occurred_at ASC",
+        )?;
+        let rows = stmt.query_map(params![pattern_id], row_to_event_summary)?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(EventStoreError::from)
+    }
+
+    // --- pattern embeddings (stands in for ADR-0007's sqlite-vec table — see
+    // the comment at the top of schema.sql) ---
+
+    pub fn upsert_pattern_embedding(
+        &self,
+        pattern_id: i64,
+        embedding: &[f32],
+    ) -> Result<(), EventStoreError> {
+        let conn = self.conn.lock().expect("event store mutex poisoned");
+        conn.execute(
+            "INSERT INTO pattern_embeddings (pattern_id, embedding, dimensions)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(pattern_id) DO UPDATE SET embedding = excluded.embedding, dimensions = excluded.dimensions",
+            params![pattern_id, encode_embedding(embedding), embedding.len() as i64],
+        )?;
+        Ok(())
+    }
+
+    /// Brute-force cosine-similarity search over every stored pattern embedding —
+    /// see the file-level comment in `schema.sql` for why this is Rust-side
+    /// rather than a native `vec0` virtual table, and why that's an honest
+    /// implementation of ADR-0007's semantics rather than a shortcut around it.
+    /// Returns `(pattern_id, similarity)` pairs, highest similarity first.
+    pub fn find_similar_patterns(
+        &self,
+        query: &[f32],
+        top_k: usize,
+    ) -> Result<Vec<(i64, f32)>, EventStoreError> {
+        let conn = self.conn.lock().expect("event store mutex poisoned");
+        let mut stmt = conn.prepare("SELECT pattern_id, embedding FROM pattern_embeddings")?;
+        let mut scored: Vec<(i64, f32)> = stmt
+            .query_map([], |row| {
+                let pattern_id: i64 = row.get(0)?;
+                let blob: Vec<u8> = row.get(1)?;
+                Ok((pattern_id, decode_embedding(&blob)))
+            })?
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .map(|(id, vector)| (id, cosine_similarity(query, &vector)))
+            .collect();
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scored.truncate(top_k);
+        Ok(scored)
+    }
+
+    // --- recommendations (ADR-0010) ---
+
+    pub fn insert_recommendation(&self, rec: &Recommendation) -> Result<i64, EventStoreError> {
+        let conn = self.conn.lock().expect("event store mutex poisoned");
+        conn.execute(
+            "INSERT INTO recommendations
+                (pattern_id, created_at, title, category, why, confidence,
+                 estimated_time_saved_minutes, difficulty, maintenance_burden,
+                 privacy_implications, implementation_effort, alternatives_json,
+                 assumptions_json, ignored_information_json, generating_provider,
+                 status, dismissal_reason)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+            params![
+                rec.pattern_id,
+                to_rfc3339(rec.created_at),
+                rec.title,
+                recommendation_category_to_str(rec.category),
+                rec.why,
+                rec.confidence,
+                rec.estimated_time_saved_minutes,
+                level_to_str(rec.difficulty),
+                level_to_str(rec.maintenance_burden),
+                rec.privacy_implications,
+                rec.implementation_effort,
+                serde_json::to_string(&rec.alternatives)?,
+                serde_json::to_string(&rec.assumptions)?,
+                serde_json::to_string(&rec.ignored_information)?,
+                rec.generating_provider,
+                recommendation_status_to_str(rec.status),
+                rec.dismissal_reason,
+            ],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    pub fn set_recommendation_status(
+        &self,
+        id: i64,
+        status: RecommendationStatus,
+        dismissal_reason: Option<&str>,
+    ) -> Result<(), EventStoreError> {
+        let conn = self.conn.lock().expect("event store mutex poisoned");
+        conn.execute(
+            "UPDATE recommendations SET status = ?1, dismissal_reason = ?2 WHERE id = ?3",
+            params![recommendation_status_to_str(status), dismissal_reason, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_recommendations(
+        &self,
+        status_filter: Option<RecommendationStatus>,
+    ) -> Result<Vec<Recommendation>, EventStoreError> {
+        let conn = self.conn.lock().expect("event store mutex poisoned");
+        let base = "SELECT id, pattern_id, created_at, title, category, why, confidence,
+                    estimated_time_saved_minutes, difficulty, maintenance_burden,
+                    privacy_implications, implementation_effort, alternatives_json,
+                    assumptions_json, ignored_information_json, generating_provider,
+                    status, dismissal_reason
+             FROM recommendations";
+        let (sql, filter): (String, Option<&'static str>) = match status_filter {
+            Some(status) => (
+                format!("{base} WHERE status = ?1"),
+                Some(recommendation_status_to_str(status)),
+            ),
+            None => (base.to_string(), None),
+        };
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = match filter {
+            Some(status) => stmt.query_map(params![status], row_to_recommendation)?,
+            None => stmt.query_map([], row_to_recommendation)?,
+        };
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(EventStoreError::from)
     }
 }
 
@@ -378,6 +624,204 @@ fn row_to_audit_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<AuditEntry> {
         action_type,
         details: serde_json::from_str(&details_json)
             .map_err(|e| map_err(EventStoreError::Serialization(e)))?,
+    })
+}
+
+fn pattern_status_to_str(status: PatternStatus) -> &'static str {
+    match status {
+        PatternStatus::Active => "active",
+        PatternStatus::Stale => "stale",
+        PatternStatus::Dismissed => "dismissed",
+    }
+}
+
+fn pattern_status_from_str(value: &str) -> Result<PatternStatus, EventStoreError> {
+    match value {
+        "active" => Ok(PatternStatus::Active),
+        "stale" => Ok(PatternStatus::Stale),
+        "dismissed" => Ok(PatternStatus::Dismissed),
+        other => Err(EventStoreError::InvalidStoredValue(format!(
+            "unknown pattern status '{other}'"
+        ))),
+    }
+}
+
+fn level_to_str(level: Level) -> &'static str {
+    match level {
+        Level::Low => "low",
+        Level::Medium => "medium",
+        Level::High => "high",
+    }
+}
+
+fn level_from_str(value: &str) -> Result<Level, EventStoreError> {
+    match value {
+        "low" => Ok(Level::Low),
+        "medium" => Ok(Level::Medium),
+        "high" => Ok(Level::High),
+        other => Err(EventStoreError::InvalidStoredValue(format!(
+            "unknown level '{other}'"
+        ))),
+    }
+}
+
+fn recommendation_category_to_str(category: RecommendationCategory) -> &'static str {
+    match category {
+        RecommendationCategory::Shortcut => "shortcut",
+        RecommendationCategory::Template => "template",
+        RecommendationCategory::Script => "script",
+        RecommendationCategory::BrowserAutomation => "browser_automation",
+        RecommendationCategory::Rpa => "rpa",
+        RecommendationCategory::WorkflowPlatform => "workflow_platform",
+        RecommendationCategory::AiAgent => "ai_agent",
+        RecommendationCategory::Hybrid => "hybrid",
+    }
+}
+
+fn recommendation_category_from_str(
+    value: &str,
+) -> Result<RecommendationCategory, EventStoreError> {
+    match value {
+        "shortcut" => Ok(RecommendationCategory::Shortcut),
+        "template" => Ok(RecommendationCategory::Template),
+        "script" => Ok(RecommendationCategory::Script),
+        "browser_automation" => Ok(RecommendationCategory::BrowserAutomation),
+        "rpa" => Ok(RecommendationCategory::Rpa),
+        "workflow_platform" => Ok(RecommendationCategory::WorkflowPlatform),
+        "ai_agent" => Ok(RecommendationCategory::AiAgent),
+        "hybrid" => Ok(RecommendationCategory::Hybrid),
+        other => Err(EventStoreError::InvalidStoredValue(format!(
+            "unknown recommendation category '{other}'"
+        ))),
+    }
+}
+
+fn recommendation_status_to_str(status: RecommendationStatus) -> &'static str {
+    match status {
+        RecommendationStatus::Suggested => "suggested",
+        RecommendationStatus::Implemented => "implemented",
+        RecommendationStatus::Dismissed => "dismissed",
+    }
+}
+
+fn recommendation_status_from_str(value: &str) -> Result<RecommendationStatus, EventStoreError> {
+    match value {
+        "suggested" => Ok(RecommendationStatus::Suggested),
+        "implemented" => Ok(RecommendationStatus::Implemented),
+        "dismissed" => Ok(RecommendationStatus::Dismissed),
+        other => Err(EventStoreError::InvalidStoredValue(format!(
+            "unknown recommendation status '{other}'"
+        ))),
+    }
+}
+
+fn encode_embedding(vector: &[f32]) -> Vec<u8> {
+    vector.iter().flat_map(|f| f.to_le_bytes()).collect()
+}
+
+fn decode_embedding(bytes: &[u8]) -> Vec<f32> {
+    bytes
+        .chunks_exact(4)
+        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+        .collect()
+}
+
+/// Cosine similarity, in `[-1.0, 1.0]`; `0.0` for a zero-length or zero-norm
+/// vector rather than dividing by zero — an embedding provider should never
+/// actually produce an all-zero vector, but this must not panic if one somehow
+/// appears.
+fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+    if a.len() != b.len() || a.is_empty() {
+        return 0.0;
+    }
+    let dot: f32 = a.iter().zip(b).map(|(x, y)| x * y).sum();
+    let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+    if norm_a == 0.0 || norm_b == 0.0 {
+        return 0.0;
+    }
+    dot / (norm_a * norm_b)
+}
+
+fn row_to_pattern(row: &rusqlite::Row<'_>) -> rusqlite::Result<Pattern> {
+    let id: i64 = row.get(0)?;
+    let first_seen_at: String = row.get(1)?;
+    let last_seen_at: String = row.get(2)?;
+    let occurrence_count: i64 = row.get(3)?;
+    let estimated_minutes_per_occurrence: Option<f64> = row.get(4)?;
+    let sequence_signature_json: String = row.get(5)?;
+    let status: String = row.get(6)?;
+
+    let map_err = |e: EventStoreError| {
+        rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
+    };
+
+    Ok(Pattern {
+        id: Some(id),
+        first_seen_at: from_rfc3339(&first_seen_at).map_err(map_err)?,
+        last_seen_at: from_rfc3339(&last_seen_at).map_err(map_err)?,
+        occurrence_count: occurrence_count as u32,
+        estimated_minutes_per_occurrence,
+        sequence_signature: serde_json::from_str(&sequence_signature_json)
+            .map_err(|e| map_err(EventStoreError::Serialization(e)))?,
+        status: pattern_status_from_str(&status).map_err(map_err)?,
+    })
+}
+
+fn row_to_recommendation(row: &rusqlite::Row<'_>) -> rusqlite::Result<Recommendation> {
+    let map_err = |e: EventStoreError| {
+        rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
+    };
+    let parse_json = |s: &str| -> rusqlite::Result<serde_json::Value> {
+        serde_json::from_str(s).map_err(|e| map_err(EventStoreError::Serialization(e)))
+    };
+
+    let id: i64 = row.get(0)?;
+    let pattern_id: i64 = row.get(1)?;
+    let created_at: String = row.get(2)?;
+    let title: String = row.get(3)?;
+    let category: String = row.get(4)?;
+    let why: String = row.get(5)?;
+    let confidence: f64 = row.get(6)?;
+    let estimated_time_saved_minutes: f64 = row.get(7)?;
+    let difficulty: String = row.get(8)?;
+    let maintenance_burden: String = row.get(9)?;
+    let privacy_implications: String = row.get(10)?;
+    let implementation_effort: String = row.get(11)?;
+    let alternatives_json: String = row.get(12)?;
+    let assumptions_json: String = row.get(13)?;
+    let ignored_information_json: String = row.get(14)?;
+    let generating_provider: String = row.get(15)?;
+    let status: String = row.get(16)?;
+    let dismissal_reason: Option<String> = row.get(17)?;
+
+    let alternatives: Vec<Alternative> = serde_json::from_value(parse_json(&alternatives_json)?)
+        .map_err(|e| map_err(EventStoreError::Serialization(e)))?;
+    let assumptions: Vec<String> = serde_json::from_value(parse_json(&assumptions_json)?)
+        .map_err(|e| map_err(EventStoreError::Serialization(e)))?;
+    let ignored_information: Vec<String> =
+        serde_json::from_value(parse_json(&ignored_information_json)?)
+            .map_err(|e| map_err(EventStoreError::Serialization(e)))?;
+
+    Ok(Recommendation {
+        id: Some(id),
+        pattern_id,
+        created_at: from_rfc3339(&created_at).map_err(map_err)?,
+        title,
+        category: recommendation_category_from_str(&category).map_err(map_err)?,
+        why,
+        confidence: confidence as f32,
+        estimated_time_saved_minutes,
+        difficulty: level_from_str(&difficulty).map_err(map_err)?,
+        maintenance_burden: level_from_str(&maintenance_burden).map_err(map_err)?,
+        privacy_implications,
+        implementation_effort,
+        alternatives,
+        assumptions,
+        ignored_information,
+        generating_provider,
+        status: recommendation_status_from_str(&status).map_err(map_err)?,
+        dismissal_reason,
     })
 }
 
@@ -585,5 +1029,209 @@ mod tests {
         assert_eq!(export["event_summaries"].as_array().unwrap().len(), 1);
         assert!(export["privacy_state"].is_object());
         assert!(export["audit_log"].is_array());
+    }
+
+    fn sample_pattern() -> Pattern {
+        Pattern {
+            id: None,
+            first_seen_at: OffsetDateTime::now_utc(),
+            last_seen_at: OffsetDateTime::now_utc(),
+            occurrence_count: 31,
+            estimated_minutes_per_occurrence: Some(21.3),
+            sequence_signature: serde_json::json!(["jira", "clipboard", "excel", "save"]),
+            status: PatternStatus::Active,
+        }
+    }
+
+    #[test]
+    fn pattern_round_trips_through_insert_and_list() {
+        let store = SqlCipherEventStore::open_in_memory(&test_key()).unwrap();
+        let id = store.insert_pattern(&sample_pattern()).unwrap();
+
+        let patterns = store.list_patterns(None).unwrap();
+        assert_eq!(patterns.len(), 1);
+        assert_eq!(patterns[0].id, Some(id));
+        assert_eq!(patterns[0].occurrence_count, 31);
+        assert_eq!(patterns[0].status, PatternStatus::Active);
+    }
+
+    #[test]
+    fn update_pattern_stats_changes_only_the_rolling_fields() {
+        let store = SqlCipherEventStore::open_in_memory(&test_key()).unwrap();
+        let id = store.insert_pattern(&sample_pattern()).unwrap();
+        let new_last_seen = OffsetDateTime::now_utc() + time::Duration::days(1);
+
+        store
+            .update_pattern_stats(id, new_last_seen, 32, Some(21.5))
+            .unwrap();
+
+        let patterns = store.list_patterns(None).unwrap();
+        assert_eq!(patterns[0].occurrence_count, 32);
+        assert_eq!(patterns[0].estimated_minutes_per_occurrence, Some(21.5));
+    }
+
+    #[test]
+    fn set_pattern_status_filters_list_patterns() {
+        let store = SqlCipherEventStore::open_in_memory(&test_key()).unwrap();
+        let id = store.insert_pattern(&sample_pattern()).unwrap();
+        store
+            .set_pattern_status(id, PatternStatus::Dismissed)
+            .unwrap();
+
+        assert!(store
+            .list_patterns(Some(PatternStatus::Active))
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            store
+                .list_patterns(Some(PatternStatus::Dismissed))
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn pattern_events_traceability_returns_the_contributing_observations() {
+        let store = SqlCipherEventStore::open_in_memory(&test_key()).unwrap();
+        let pattern_id = store.insert_pattern(&sample_pattern()).unwrap();
+
+        let event_id = store
+            .insert_event_summary(&EventSummary::new(
+                OffsetDateTime::now_utc(),
+                "src",
+                SignalType::AppFocusChange,
+                PrivacyLevel::ApplicationMetadata,
+                serde_json::json!({ "app": "Jira" }),
+                None,
+            ))
+            .unwrap();
+        store.link_pattern_events(pattern_id, &[event_id]).unwrap();
+
+        let contributing = store.list_pattern_events(pattern_id).unwrap();
+        assert_eq!(contributing.len(), 1);
+        assert_eq!(contributing[0].id, Some(event_id));
+    }
+
+    #[test]
+    fn find_similar_patterns_ranks_by_cosine_similarity() {
+        let store = SqlCipherEventStore::open_in_memory(&test_key()).unwrap();
+        let close_id = store.insert_pattern(&sample_pattern()).unwrap();
+        let far_id = store.insert_pattern(&sample_pattern()).unwrap();
+
+        store
+            .upsert_pattern_embedding(close_id, &[1.0, 0.0, 0.0])
+            .unwrap();
+        store
+            .upsert_pattern_embedding(far_id, &[0.0, 1.0, 0.0])
+            .unwrap();
+
+        let results = store.find_similar_patterns(&[0.9, 0.1, 0.0], 2).unwrap();
+        assert_eq!(results[0].0, close_id);
+        assert!(results[0].1 > results[1].1);
+    }
+
+    #[test]
+    fn upserting_an_embedding_twice_replaces_it_rather_than_duplicating() {
+        let store = SqlCipherEventStore::open_in_memory(&test_key()).unwrap();
+        let id = store.insert_pattern(&sample_pattern()).unwrap();
+        store.upsert_pattern_embedding(id, &[1.0, 0.0]).unwrap();
+        store.upsert_pattern_embedding(id, &[0.0, 1.0]).unwrap();
+
+        let results = store.find_similar_patterns(&[0.0, 1.0], 10).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].1, 1.0);
+    }
+
+    fn sample_recommendation(pattern_id: i64) -> Recommendation {
+        Recommendation {
+            id: None,
+            pattern_id,
+            created_at: OffsetDateTime::now_utc(),
+            title: "Automate the weekly ticket export".to_string(),
+            category: RecommendationCategory::Hybrid,
+            why: "This exact sequence recurs with high regularity.".to_string(),
+            confidence: 0.9,
+            estimated_time_saved_minutes: 660.0,
+            difficulty: Level::Medium,
+            maintenance_burden: Level::Low,
+            privacy_implications: "Fully local, no cloud dispatch required.".to_string(),
+            implementation_effort: "~2-3 hours one-time setup".to_string(),
+            alternatives: vec![Alternative {
+                approach: "Python script".to_string(),
+                tradeoff: "Lower setup effort, higher long-term maintenance.".to_string(),
+            }],
+            assumptions: vec!["API access to the source system is available.".to_string()],
+            ignored_information: vec![
+                "Occurrences on a second device were not correlated.".to_string()
+            ],
+            generating_provider: "ollama".to_string(),
+            status: RecommendationStatus::Suggested,
+            dismissal_reason: None,
+        }
+    }
+
+    #[test]
+    fn recommendation_round_trips_every_explainability_field() {
+        let store = SqlCipherEventStore::open_in_memory(&test_key()).unwrap();
+        let pattern_id = store.insert_pattern(&sample_pattern()).unwrap();
+        let rec = sample_recommendation(pattern_id);
+        store.insert_recommendation(&rec).unwrap();
+
+        let recommendations = store.list_recommendations(None).unwrap();
+        assert_eq!(recommendations.len(), 1);
+        let stored = &recommendations[0];
+        assert_eq!(stored.title, rec.title);
+        assert_eq!(stored.category, rec.category);
+        assert_eq!(stored.why, rec.why);
+        assert_eq!(stored.confidence, rec.confidence);
+        assert_eq!(stored.alternatives, rec.alternatives);
+        assert_eq!(stored.assumptions, rec.assumptions);
+        assert_eq!(stored.ignored_information, rec.ignored_information);
+    }
+
+    #[test]
+    fn set_recommendation_status_records_dismissal_reason() {
+        let store = SqlCipherEventStore::open_in_memory(&test_key()).unwrap();
+        let pattern_id = store.insert_pattern(&sample_pattern()).unwrap();
+        let id = store
+            .insert_recommendation(&sample_recommendation(pattern_id))
+            .unwrap();
+
+        store
+            .set_recommendation_status(
+                id,
+                RecommendationStatus::Dismissed,
+                Some("not worth the effort"),
+            )
+            .unwrap();
+
+        let recommendations = store.list_recommendations(None).unwrap();
+        assert_eq!(recommendations[0].status, RecommendationStatus::Dismissed);
+        assert_eq!(
+            recommendations[0].dismissal_reason.as_deref(),
+            Some("not worth the effort")
+        );
+    }
+
+    #[test]
+    fn delete_all_data_also_clears_patterns_embeddings_and_recommendations() {
+        let store = SqlCipherEventStore::open_in_memory(&test_key()).unwrap();
+        let pattern_id = store.insert_pattern(&sample_pattern()).unwrap();
+        store
+            .upsert_pattern_embedding(pattern_id, &[1.0, 0.0])
+            .unwrap();
+        store
+            .insert_recommendation(&sample_recommendation(pattern_id))
+            .unwrap();
+
+        store.delete_all_data().unwrap();
+
+        assert!(store.list_patterns(None).unwrap().is_empty());
+        assert!(store.list_recommendations(None).unwrap().is_empty());
+        assert!(store
+            .find_similar_patterns(&[1.0, 0.0], 10)
+            .unwrap()
+            .is_empty());
     }
 }

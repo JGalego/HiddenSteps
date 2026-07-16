@@ -1,0 +1,127 @@
+name: CI
+
+# This workflow is the verification this repo's dev sandbox could not provide
+# for itself (see crates/README.md and apps/desktop/README.md): GitHub-hosted
+# runners have a real macOS toolchain, a real Windows SDK, and (on Ubuntu) real
+# root/apt access to install webkit2gtk — none of which were available while
+# writing this code. The `core` job below re-runs everything already verified
+# locally; `tauri-shell` and the macOS/Windows legs of `core` are this
+# workflow's actual point: the *first* real compilation of code that, until it
+# runs here, is "written to the correct API, not yet proven correct."
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  core:
+    name: Rust core (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format check
+        run: cargo fmt --check
+
+      # On ubuntu-latest this is a re-run of what's already verified in
+      # crates/README.md. On macos-latest and windows-latest, this is the
+      # FIRST real build of crates/observation's macOS/Windows
+      # ActiveWindowSource modules (see that crate's lib.rs doc comment) — a
+      # failure here is expected to happen at some point and is exactly what
+      # this leg exists to catch, not a sign anything about the workflow is
+      # wrong.
+      - name: Build workspace
+        run: cargo build --workspace --all-targets
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      # linux.shortcuts' real-XGrabKey test and hiddensteps-security's
+      # real-OS-vault test are both #[ignore]d by design (see their doc
+      # comments) — they need a real, currently-focused desktop session, which
+      # a CI runner is not. They still compile as part of `cargo test`'s build
+      # step; only their execution is skipped.
+      - name: Test workspace
+        run: cargo test --workspace
+        env:
+          # Linux runners: hiddensteps-observation's tests need a real X11
+          # display. GitHub's ubuntu-latest runners don't have one by default;
+          # xvfb provides a virtual one so the same real (not mocked) X11
+          # assertions this sandbox ran against WSLg's display run here too.
+          DISPLAY: ":99"
+
+      - name: Start a virtual X server (Linux only, for hiddensteps-observation)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+          Xvfb :99 -screen 0 1280x1024x24 &
+          sleep 2
+
+  ui:
+    name: UI (npm)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/desktop/ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+          cache-dependency-path: apps/desktop/ui/package-lock.json
+      - run: npm ci
+      - run: npx tsc -b
+      - run: npm test
+      - run: npm run build
+
+  tauri-shell:
+    name: Tauri shell (${{ matrix.os }})
+    needs: ui
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      # The exact package list Tauri v2's own Linux setup docs specify. This
+      # step is the reason tauri-shell can only be verified in CI, not in the
+      # sandbox this code was written in (no passwordless sudo there — see
+      # apps/desktop/README.md).
+      - name: Install Tauri Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            build-essential \
+            curl wget file patchelf
+
+      - name: Build the UI (frontendDist for the Tauri build)
+        working-directory: apps/desktop/ui
+        run: |
+          npm ci
+          npm run build
+
+      - name: cargo build the Tauri shell
+        working-directory: apps/desktop/src-tauri
+        run: cargo build

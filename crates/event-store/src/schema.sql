@@ -1,10 +1,15 @@
--- Mirrors docs/design/07-database-schema.md exactly, with one deliberate
--- deviation: the `summary_embeddings` sqlite-vec virtual table is deferred to the
--- migration that ships the Embedding Layer (roadmap milestone M2) — loading the
--- sqlite-vec extension is Embedding Layer's concern, not the base EventStore's, and
--- there is nothing to embed yet before Pattern Detection exists to produce
--- pattern-level summaries. Every other table below is created now so the schema a
--- future migration extends is the real one, not a placeholder.
+-- Mirrors docs/design/07-database-schema.md, with one deliberate deviation: in
+-- place of the `summary_embeddings` sqlite-vec VIRTUAL TABLE that ADR-0007
+-- specifies, this schema uses a plain `pattern_embeddings` table (BLOB-encoded
+-- f32 vectors) with similarity search computed in Rust (see store.rs's
+-- `find_similar_patterns`). ADR-0007 itself documents that at realistic
+-- single-user volumes, sqlite-vec's own behavior *is* brute-force exact search —
+-- this implementation provides the same semantics without depending on loading a
+-- native SQLite extension, which this environment could not compile-verify.
+-- Swapping in the real `vec0` virtual table later is a storage-layer
+-- optimization (relevant only if pattern-embedding volume ever grows enough for
+-- exact search to matter), not a semantics change, and does not require
+-- revisiting anything that calls `find_similar_patterns`.
 
 CREATE TABLE IF NOT EXISTS schema_version (
     version         INTEGER PRIMARY KEY,
@@ -57,6 +62,15 @@ CREATE TABLE IF NOT EXISTS pattern_events (
     pattern_id      INTEGER NOT NULL REFERENCES patterns(id) ON DELETE CASCADE,
     event_id        INTEGER NOT NULL REFERENCES event_summaries(id) ON DELETE CASCADE,
     PRIMARY KEY (pattern_id, event_id)
+);
+
+-- See the file-level comment above: this stands in for ADR-0007's sqlite-vec
+-- `summary_embeddings` virtual table. One embedding per pattern (never per raw
+-- event — only pattern/workflow *summaries* are ever embedded, per ADR-0007).
+CREATE TABLE IF NOT EXISTS pattern_embeddings (
+    pattern_id  INTEGER PRIMARY KEY REFERENCES patterns(id) ON DELETE CASCADE,
+    embedding   BLOB NOT NULL,
+    dimensions  INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS workflow_nodes (

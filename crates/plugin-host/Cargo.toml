@@ -1,0 +1,15 @@
+[package]
+name = "hiddensteps-plugin-host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+wasmtime = { version = "25", default-features = false, features = ["cranelift", "runtime"] }
+
+[dev-dependencies]
+wat = "1"

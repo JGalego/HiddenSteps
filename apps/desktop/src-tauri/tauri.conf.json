@@ -1,0 +1,38 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "HiddenSteps",
+  "version": "0.1.0",
+  "identifier": "com.hiddensteps.app",
+  "build": {
+    "beforeDevCommand": "npm run dev --prefix ../ui",
+    "beforeBuildCommand": "npm run build --prefix ../ui",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../ui/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "HiddenSteps",
+        "width": 1100,
+        "height": 760,
+        "minWidth": 800,
+        "minHeight": 600
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' ipc: http://localhost:* http://127.0.0.1:*"
+    },
+    "trayIcon": {
+      "iconPath": "icons/icon.png",
+      "tooltip": "HiddenSteps — observation paused"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi", "dmg", "appimage"],
+    "icon": ["icons/icon.png"],
+    "category": "Utility",
+    "shortDescription": "A local-first workflow intelligence tool",
+    "longDescription": "HiddenSteps observes how you work, at a privacy level you choose, and explains where your effort is going and what your options are for getting it back — without automating anything on your behalf by default."
+  }
+}

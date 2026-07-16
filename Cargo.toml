@@ -4,6 +4,15 @@ members = [
     "crates/domain",
     "crates/security",
     "crates/event-store",
+    "crates/redaction",
+    "crates/pipeline",
+    "crates/observation",
+    "crates/llm-provider",
+    "crates/patterns",
+    "crates/recommendations",
+    "crates/privacy-engine",
+    "crates/plugin-host",
+    "crates/enterprise-policy",
 ]
 
 [workspace.package]

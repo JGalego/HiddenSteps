@@ -1,0 +1,35 @@
+[package]
+name = "hiddensteps-desktop"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+# See ../README.md: intentionally NOT a member of the root workspace, and
+# NOT VERIFIED TO COMPILE in this environment (no webkit2gtk available to link
+# against on this Linux dev box). Every dependency below on a `hiddensteps-*`
+# crate is the same, already-tested crate the root workspace builds — only the
+# `tauri` glue in `src/main.rs` is unverified.
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+hiddensteps-domain = { path = "../../../crates/domain" }
+hiddensteps-security = { path = "../../../crates/security" }
+hiddensteps-event-store = { path = "../../../crates/event-store" }
+hiddensteps-pipeline = { path = "../../../crates/pipeline" }
+hiddensteps-patterns = { path = "../../../crates/patterns" }
+hiddensteps-llm-provider = { path = "../../../crates/llm-provider" }
+hiddensteps-privacy-engine = { path = "../../../crates/privacy-engine" }
+hiddensteps-recommendations = { path = "../../../crates/recommendations" }
+hiddensteps-enterprise-policy = { path = "../../../crates/enterprise-policy" }
+hiddensteps-plugin-host = { path = "../../../crates/plugin-host" }
+hiddensteps-observation = { path = "../../../crates/observation" }
+
+tauri = { version = "2", features = [] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
+time = { version = "0.3", features = ["serde"] }

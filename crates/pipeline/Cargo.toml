@@ -1,0 +1,12 @@
+[package]
+name = "hiddensteps-pipeline"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+hiddensteps-domain = { path = "../domain" }
+hiddensteps-redaction = { path = "../redaction" }
+serde_json.workspace = true
+time.workspace = true

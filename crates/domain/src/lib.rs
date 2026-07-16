@@ -7,9 +7,15 @@
 mod audit;
 mod captured_signal;
 mod event;
+mod pattern;
 mod privacy;
+mod recommendation;
 
 pub use audit::{AuditActor, AuditEntry};
-pub use captured_signal::CapturedSignal;
+pub use captured_signal::{CapturedPayload, CapturedSignal};
 pub use event::{EventSummary, SignalType};
+pub use pattern::{Pattern, PatternStatus};
 pub use privacy::{PrivacyLevel, PrivacyLevelError, PrivacyState};
+pub use recommendation::{
+    Alternative, Level, Recommendation, RecommendationCategory, RecommendationStatus,
+};
