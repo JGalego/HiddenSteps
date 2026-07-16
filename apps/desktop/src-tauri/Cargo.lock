@@ -1553,7 +1553,7 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "hiddensteps-desktop"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "hiddensteps-domain",
  "hiddensteps-enterprise-policy",
@@ -1577,7 +1577,7 @@ dependencies = [
 
 [[package]]
 name = "hiddensteps-domain"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -1587,7 +1587,7 @@ dependencies = [
 
 [[package]]
 name = "hiddensteps-enterprise-policy"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "hiddensteps-domain",
  "serde",
@@ -1597,7 +1597,7 @@ dependencies = [
 
 [[package]]
 name = "hiddensteps-event-store"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "hiddensteps-domain",
  "rusqlite",
@@ -1609,7 +1609,7 @@ dependencies = [
 
 [[package]]
 name = "hiddensteps-llm-provider"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "async-trait",
  "reqwest 0.12.28",
@@ -1621,7 +1621,7 @@ dependencies = [
 
 [[package]]
 name = "hiddensteps-observation"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "core-foundation 0.9.4",
  "hiddensteps-domain",
@@ -1633,7 +1633,7 @@ dependencies = [
 
 [[package]]
 name = "hiddensteps-patterns"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "hiddensteps-domain",
  "serde_json",
@@ -1642,7 +1642,7 @@ dependencies = [
 
 [[package]]
 name = "hiddensteps-pipeline"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "hiddensteps-domain",
  "hiddensteps-redaction",
@@ -1652,7 +1652,7 @@ dependencies = [
 
 [[package]]
 name = "hiddensteps-plugin-host"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -1662,7 +1662,7 @@ dependencies = [
 
 [[package]]
 name = "hiddensteps-privacy-engine"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "hiddensteps-domain",
  "hiddensteps-llm-provider",
@@ -1671,7 +1671,7 @@ dependencies = [
 
 [[package]]
 name = "hiddensteps-recommendations"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "hiddensteps-domain",
  "hiddensteps-llm-provider",
@@ -1686,7 +1686,7 @@ dependencies = [
 
 [[package]]
 name = "hiddensteps-redaction"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "once_cell",
  "regex",
@@ -1694,7 +1694,7 @@ dependencies = [
 
 [[package]]
 name = "hiddensteps-security"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "argon2",
  "base64 0.22.1",

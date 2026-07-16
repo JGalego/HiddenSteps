@@ -729,7 +729,7 @@ checksum = "fc0fef456e4baa96da950455cd02c081ca953b141298e41db3fc7e36b1da849c"
 
 [[package]]
 name = "hiddensteps-domain"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -739,7 +739,7 @@ dependencies = [
 
 [[package]]
 name = "hiddensteps-enterprise-policy"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "hiddensteps-domain",
  "serde",
@@ -749,7 +749,7 @@ dependencies = [
 
 [[package]]
 name = "hiddensteps-event-store"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "hiddensteps-domain",
  "rusqlite",
@@ -762,7 +762,7 @@ dependencies = [
 
 [[package]]
 name = "hiddensteps-llm-provider"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "async-trait",
  "reqwest",
@@ -775,7 +775,7 @@ dependencies = [
 
 [[package]]
 name = "hiddensteps-observation"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "core-foundation",
  "hiddensteps-domain",
@@ -788,7 +788,7 @@ dependencies = [
 
 [[package]]
 name = "hiddensteps-patterns"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "hiddensteps-domain",
  "serde_json",
@@ -797,7 +797,7 @@ dependencies = [
 
 [[package]]
 name = "hiddensteps-pipeline"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "hiddensteps-domain",
  "hiddensteps-redaction",
@@ -807,7 +807,7 @@ dependencies = [
 
 [[package]]
 name = "hiddensteps-plugin-host"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -818,7 +818,7 @@ dependencies = [
 
 [[package]]
 name = "hiddensteps-privacy-engine"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "async-trait",
  "hiddensteps-domain",
@@ -829,7 +829,7 @@ dependencies = [
 
 [[package]]
 name = "hiddensteps-recommendations"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "async-trait",
  "hiddensteps-domain",
@@ -846,7 +846,7 @@ dependencies = [
 
 [[package]]
 name = "hiddensteps-redaction"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "once_cell",
  "regex",
@@ -854,7 +854,7 @@ dependencies = [
 
 [[package]]
 name = "hiddensteps-security"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "argon2",
  "base64",
