@@ -40,27 +40,41 @@ export function SettingsPage() {
   return (
     <section aria-label="Settings">
       <h1>Settings</h1>
-      {error && <p role="alert">{error}</p>}
+      {error && (
+        <p className="alert" role="alert">
+          {error}
+        </p>
+      )}
 
-      <div>
+      <div className="card section-block">
         <h2>Privacy</h2>
         {status && (
           <p>
             Level: <strong>{status.current_level}</strong>
-            <button type="button" onClick={() => changeLevel(Math.max(0, status.current_level - 1))}>
-              Lower
-            </button>
-            <button type="button" onClick={() => changeLevel(Math.min(4, status.current_level + 1))}>
-              Raise
-            </button>
+            <span className="inline-btn-group">
+              <button
+                className="btn"
+                type="button"
+                onClick={() => changeLevel(Math.max(0, status.current_level - 1))}
+              >
+                Lower
+              </button>
+              <button
+                className="btn"
+                type="button"
+                onClick={() => changeLevel(Math.min(4, status.current_level + 1))}
+              >
+                Raise
+              </button>
+            </span>
           </p>
         )}
       </div>
 
-      <div>
+      <div className="card section-block">
         <h2>AI Provider</h2>
         {providers.length === 0 && <p>No provider configured yet.</p>}
-        <ul data-testid="provider-list">
+        <ul className="provider-list" data-testid="provider-list">
           {providers.map((p) => (
             <li key={p.id}>
               {p.active ? "● " : "○ "}

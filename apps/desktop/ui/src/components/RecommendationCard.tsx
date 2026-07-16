@@ -35,26 +35,28 @@ export function RecommendationCard({
   };
 
   return (
-    <article aria-label={recommendation.title}>
+    <article className="recommendation-card" aria-label={recommendation.title}>
       <h3>{recommendation.title}</h3>
-      <p>
+      <p className="recommendation-meta">
         Estimated time saved:{" "}
         <strong>{recommendation.estimated_time_saved_minutes.toFixed(0)} minutes</strong>
       </p>
-      <p>
+      <p className="recommendation-meta">
         Recommended: {recommendation.category} · Confidence:{" "}
-        <span aria-label={`confidence ${recommendation.confidence}`}>
+        <span className="confidence-dots" aria-label={`confidence ${recommendation.confidence}`}>
           {confidenceLabel(recommendation.confidence)}
         </span>{" "}
         · Difficulty: {recommendation.difficulty}
       </p>
 
-      <button type="button" onClick={() => setExpanded((v) => !v)}>
-        {expanded ? "Hide details" : "Why?"}
-      </button>
+      <div className="btn-row">
+        <button className="btn" type="button" onClick={() => setExpanded((v) => !v)}>
+          {expanded ? "Hide details" : "Why?"}
+        </button>
+      </div>
 
       {expanded && (
-        <div data-testid="recommendation-detail">
+        <div className="recommendation-detail" data-testid="recommendation-detail">
           <h4>Why this recommendation</h4>
           <p>{recommendation.why}</p>
 
@@ -95,12 +97,14 @@ export function RecommendationCard({
         </div>
       )}
 
-      <button type="button" onClick={markImplemented}>
-        Mark implemented
-      </button>
-      <button type="button" onClick={() => dismiss("not worth the effort")}>
-        Dismiss
-      </button>
+      <div className="btn-row">
+        <button className="btn btn-primary" type="button" onClick={markImplemented}>
+          Mark implemented
+        </button>
+        <button className="btn" type="button" onClick={() => dismiss("not worth the effort")}>
+          Dismiss
+        </button>
+      </div>
     </article>
   );
 }

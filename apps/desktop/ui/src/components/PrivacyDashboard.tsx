@@ -60,27 +60,34 @@ export function PrivacyDashboard() {
     <section aria-label="Privacy Dashboard">
       <h1>Privacy Dashboard</h1>
 
-      {error && <p role="alert">{error}</p>}
+      {error && (
+        <p className="alert" role="alert">
+          {error}
+        </p>
+      )}
 
       {status && (
-        <p data-testid="status-line">
-          <span data-testid="status-indicator">
+        <p className="status-line card" data-testid="status-line">
+          <span
+            className={`status-indicator ${status.observation_active ? "is-active" : "is-paused"}`}
+            data-testid="status-indicator"
+          >
             {status.observation_active ? "● Observing" : "○ Paused"}
           </span>
           {" — "}
           {LEVEL_LABELS[status.current_level] ?? `Level ${status.current_level}`}
-          <button type="button" onClick={togglePause}>
+          <button className="btn" type="button" onClick={togglePause}>
             {status.observation_active ? "Pause" : "Resume"}
           </button>
         </p>
       )}
 
-      <div>
+      <div className="section-block">
         <h2>What's being captured right now</h2>
         {events.length === 0 ? (
           <p>Nothing captured yet.</p>
         ) : (
-          <ul data-testid="recent-events">
+          <ul className="event-list" data-testid="recent-events">
             {events.map((event) => (
               <li key={event.id ?? `${event.source_id}-${event.occurred_at}`}>
                 <time>{event.occurred_at}</time> {event.source_id} — {event.signal_type}
@@ -90,13 +97,13 @@ export function PrivacyDashboard() {
         )}
       </div>
 
-      <div>
+      <div className="section-block">
         {!confirmingDelete ? (
-          <button type="button" onClick={() => setConfirmingDelete(true)}>
+          <button className="btn btn-danger" type="button" onClick={() => setConfirmingDelete(true)}>
             Delete all data
           </button>
         ) : (
-          <div role="alertdialog" aria-label="Delete all HiddenSteps data?">
+          <div className="confirm-dialog" role="alertdialog" aria-label="Delete all HiddenSteps data?">
             <p>
               This removes every captured summary, pattern, recommendation, and
               setting — permanently. This cannot be undone.
@@ -105,12 +112,14 @@ export function PrivacyDashboard() {
               Your encryption key will also be deleted, so even a backup copy of
               this data becomes unreadable.
             </p>
-            <button type="button" onClick={() => setConfirmingDelete(false)}>
-              Cancel
-            </button>
-            <button type="button" onClick={confirmDeleteAll}>
-              Delete everything
-            </button>
+            <div className="btn-row">
+              <button className="btn" type="button" onClick={() => setConfirmingDelete(false)}>
+                Cancel
+              </button>
+              <button className="btn btn-danger" type="button" onClick={confirmDeleteAll}>
+                Delete everything
+              </button>
+            </div>
           </div>
         )}
       </div>

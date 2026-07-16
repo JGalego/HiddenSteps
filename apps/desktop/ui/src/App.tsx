@@ -36,7 +36,7 @@ export function App() {
   }, [onboardingComplete, refreshRecommendations]);
 
   if (onboardingComplete === null) {
-    return <p>Loading…</p>;
+    return <p className="app-loading">Loading…</p>;
   }
 
   if (!onboardingComplete) {
@@ -44,8 +44,8 @@ export function App() {
   }
 
   return (
-    <main>
-      <nav aria-label="Main navigation">
+    <main className="app-shell">
+      <nav className="main-nav" aria-label="Main navigation">
         {(["dashboard", "recommendations", "settings", "diagnostics"] as Tab[]).map((t) => (
           <button
             key={t}

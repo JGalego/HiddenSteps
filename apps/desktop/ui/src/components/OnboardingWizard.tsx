@@ -115,27 +115,34 @@ export function OnboardingWizard({ onComplete }: { onComplete: () => void }) {
   };
 
   return (
-    <section aria-label="HiddenSteps setup" data-testid="onboarding-wizard">
-      <p data-testid="step-indicator">
+    <section className="onboarding-shell" aria-label="HiddenSteps setup" data-testid="onboarding-wizard">
+      <div className="step-progress" aria-hidden="true">
+        {Array.from({ length: TOTAL_STEPS }, (_, i) => (
+          <span key={i} className={`step-progress-dot ${i < step ? "is-complete" : ""}`} />
+        ))}
+      </div>
+      <p className="step-indicator-text" data-testid="step-indicator">
         Step {step} of {TOTAL_STEPS}
       </p>
 
       {step === 1 && (
-        <div>
+        <div className="card">
           <h1>Welcome to HiddenSteps</h1>
           <p>
             HiddenSteps learns how you work, over time, and shows you specific ways to work less
             hard at the repetitive parts.
           </p>
           <p>It never acts on your behalf. It only observes and suggests. You decide everything.</p>
-          <button type="button" onClick={next}>
-            Continue
-          </button>
+          <div className="btn-row">
+            <button className="btn btn-primary" type="button" onClick={next}>
+              Continue
+            </button>
+          </div>
         </div>
       )}
 
       {step === 2 && (
-        <div>
+        <div className="card">
           <h1>What HiddenSteps will never do</h1>
           <ul>
             <li>Record video or audio of your screen by default</li>
@@ -144,36 +151,40 @@ export function OnboardingWizard({ onComplete }: { onComplete: () => void }) {
             <li>Share what it learns with your employer, IT admin, or anyone else</li>
             <li>Require an account or internet connection to work</li>
           </ul>
-          <button type="button" onClick={back}>
-            Back
-          </button>
-          <button type="button" onClick={next}>
-            Continue
-          </button>
+          <div className="btn-row">
+            <button className="btn" type="button" onClick={back}>
+              Back
+            </button>
+            <button className="btn btn-primary" type="button" onClick={next}>
+              Continue
+            </button>
+          </div>
         </div>
       )}
 
       {step === 3 && (
-        <div>
+        <div className="card">
           <h1>Permissions HiddenSteps may ask for</h1>
           <p>
             You will only be asked for the permissions your chosen level actually needs — not all
             of them upfront.
           </p>
-          <button type="button" onClick={back}>
-            Back
-          </button>
-          <button type="button" onClick={next}>
-            Continue
-          </button>
+          <div className="btn-row">
+            <button className="btn" type="button" onClick={back}>
+              Back
+            </button>
+            <button className="btn btn-primary" type="button" onClick={next}>
+              Continue
+            </button>
+          </div>
         </div>
       )}
 
       {step === 4 && (
-        <div>
+        <div className="card">
           <h1>How much should HiddenSteps see?</h1>
           {LEVEL_OPTIONS.map((option) => (
-            <label key={option.level} style={{ display: "block" }}>
+            <label key={option.level} className="radio-option">
               <input
                 type="radio"
                 name="privacy-level"
@@ -181,32 +192,38 @@ export function OnboardingWizard({ onComplete }: { onComplete: () => void }) {
                 checked={privacyLevel === option.level}
                 onChange={() => setPrivacyLevel(option.level)}
               />
-              {option.label} — {option.description}
+              <span>
+                <span className="radio-option-label">{option.label}</span>
+                <span className="radio-option-description">{option.description}</span>
+              </span>
             </label>
           ))}
-          <button type="button" onClick={back}>
-            Back
-          </button>
-          <button type="button" onClick={next}>
-            Continue
-          </button>
+          <div className="btn-row">
+            <button className="btn" type="button" onClick={back}>
+              Back
+            </button>
+            <button className="btn btn-primary" type="button" onClick={next}>
+              Continue
+            </button>
+          </div>
         </div>
       )}
 
       {step === 5 && (
-        <div>
+        <div className="card">
           <h1>Choose how HiddenSteps thinks</h1>
           {runtimes === null && <p>Checking for local AI runtimes…</p>}
           {runtimes?.map((runtime) => (
-            <p key={runtime.name}>
+            <p key={runtime.name} className={`runtime-status-line ${runtime.reachable ? "is-reachable" : "is-unreachable"}`}>
               {runtime.reachable ? "✓" : "✗"} {runtime.name}
               {runtime.reachable
                 ? ` — running locally (${runtime.models.length} model${runtime.models.length === 1 ? "" : "s"})`
                 : " — not detected"}
             </p>
           ))}
-          <label>
-            Provider:{" "}
+
+          <label className="field">
+            Provider:
             <select value={providerType} onChange={(e) => { setProviderType(e.target.value); setSelectedModel(""); }}>
               <option value="ollama">Ollama (local)</option>
               <option value="openai">OpenAI (cloud)</option>
@@ -216,8 +233,8 @@ export function OnboardingWizard({ onComplete }: { onComplete: () => void }) {
 
           {isLocal ? (
             detectedModels.length > 0 ? (
-              <label>
-                Model:{" "}
+              <label className="field">
+                Model:
                 <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)}>
                   {detectedModels.map((m) => (
                     <option key={m} value={m}>
@@ -227,8 +244,8 @@ export function OnboardingWizard({ onComplete }: { onComplete: () => void }) {
                 </select>
               </label>
             ) : (
-              <label>
-                Model (none detected — enter one you've pulled):{" "}
+              <label className="field">
+                Model (none detected — enter one you've pulled)
                 <input
                   type="text"
                   value={selectedModel}
@@ -239,16 +256,16 @@ export function OnboardingWizard({ onComplete }: { onComplete: () => void }) {
             )
           ) : (
             <>
-              <label>
-                Model:{" "}
+              <label className="field">
+                Model:
                 <input
                   type="text"
                   value={selectedModel}
                   onChange={(e) => setSelectedModel(e.target.value)}
                 />
               </label>
-              <label>
-                API key:{" "}
+              <label className="field">
+                API key:
                 <input
                   type="password"
                   value={apiKey}
@@ -259,44 +276,58 @@ export function OnboardingWizard({ onComplete }: { onComplete: () => void }) {
             </>
           )}
 
-          <button type="button" onClick={back}>
-            Back
-          </button>
-          <button type="button" onClick={next}>
-            Continue
-          </button>
+          <div className="btn-row">
+            <button className="btn" type="button" onClick={back}>
+              Back
+            </button>
+            <button className="btn btn-primary" type="button" onClick={next}>
+              Continue
+            </button>
+          </div>
         </div>
       )}
 
       {step === 6 && (
-        <div>
+        <div className="card">
           <h1>Checking your setup…</h1>
-          <button type="button" onClick={runValidation} disabled={!selectedModel.trim()}>
-            Run checks
-          </button>
+          <div className="btn-row">
+            <button className="btn" type="button" onClick={runValidation} disabled={!selectedModel.trim()}>
+              Run checks
+            </button>
+          </div>
           {!selectedModel.trim() && <p>Choose or enter a model on the previous screen first.</p>}
           {validation.checked && (
-            <p data-testid="validation-result">
+            <p
+              className={`validation-result ${validation.ok ? "is-ok" : "is-error"}`}
+              data-testid="validation-result"
+            >
               {validation.ok ? "✓ Connection OK" : `✗ ${validation.error}`}
             </p>
           )}
-          <button type="button" onClick={back}>
-            Back
-          </button>
-          <button type="button" onClick={next} disabled={!validation.checked || !validation.ok}>
-            Continue
-          </button>
+          <div className="btn-row">
+            <button className="btn" type="button" onClick={back}>
+              Back
+            </button>
+            <button
+              className="btn btn-primary"
+              type="button"
+              onClick={next}
+              disabled={!validation.checked || !validation.ok}
+            >
+              Continue
+            </button>
+          </div>
         </div>
       )}
 
       {step === 7 && (
-        <div>
+        <div className="card">
           <h1>Ready to start</h1>
           <p>
             Level {privacyLevel} · {providerType} ({selectedModel})
           </p>
           <p>You can change any of this — or pause or delete everything — at any time.</p>
-          <label>
+          <label className="field-inline">
             <input
               type="checkbox"
               checked={consented}
@@ -304,17 +335,19 @@ export function OnboardingWizard({ onComplete }: { onComplete: () => void }) {
             />
             I understand what HiddenSteps will observe and consent to start.
           </label>
-          <button type="button" onClick={back}>
-            Back
-          </button>
-          <button type="button" onClick={startObserving} disabled={!consented || starting}>
-            Start observing
-          </button>
+          <div className="btn-row">
+            <button className="btn" type="button" onClick={back}>
+              Back
+            </button>
+            <button className="btn btn-primary" type="button" onClick={startObserving} disabled={!consented || starting}>
+              Start observing
+            </button>
+          </div>
         </div>
       )}
 
       {step === 8 && (
-        <div>
+        <div className="card onboarding-confirmation">
           <h1>✓ HiddenSteps is now observing</h1>
           <p>You'll usually hear from us within a day — sooner if something obvious turns up.</p>
         </div>

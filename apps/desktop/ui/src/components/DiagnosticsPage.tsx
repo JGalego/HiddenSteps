@@ -31,7 +31,9 @@ export function DiagnosticsPage() {
     return (
       <section aria-label="Diagnostics">
         <h1>Diagnostics</h1>
-        <p role="alert">{error}</p>
+        <p className="alert" role="alert">
+          {error}
+        </p>
       </section>
     );
   }
@@ -48,7 +50,7 @@ export function DiagnosticsPage() {
   return (
     <section aria-label="Diagnostics">
       <h1>Diagnostics</h1>
-      <dl>
+      <dl className="diagnostics-grid card">
         <dt>Observation</dt>
         <dd>{diagnostics.observation_active ? "Active" : "Paused"} — Level {diagnostics.privacy_level}</dd>
 
@@ -77,7 +79,7 @@ export function DiagnosticsPage() {
         <dt>Audit log entries</dt>
         <dd>{diagnostics.audit_log_count}</dd>
       </dl>
-      <p>
+      <p className="text-muted">
         Not yet reported here: GPU/CPU/memory usage, observation OS-permission status, update
         status.
       </p>
