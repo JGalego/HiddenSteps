@@ -1,5 +1,5 @@
 use core_foundation::array::CFArray;
-use core_foundation::base::TCFType;
+use core_foundation::base::{CFType, TCFType};
 use core_foundation::dictionary::CFDictionary;
 use core_foundation::number::CFNumber;
 use core_foundation::string::CFString;
@@ -64,7 +64,17 @@ impl ActiveWindowSource {
         }
         // SAFETY: `array_ref` is a valid, owned `CFArrayRef` of `CFDictionaryRef`
         // elements per `CGWindowListCopyWindowInfo`'s documented return type.
-        let windows: CFArray<CFDictionary> = unsafe { CFArray::wrap_under_create_rule(array_ref) };
+        //
+        // Explicitly typed `<CFString, CFType>` (real CI feedback, not a
+        // guess this time): `CFDictionary`'s bare/default generic params are
+        // `<*const c_void, *const c_void>`, and `CFDictionary::find`'s bound
+        // (`T: ToVoid<K>`) only accepts `&CFString` when `K = CFString` — the
+        // untyped default doesn't satisfy it. With `V = CFType`, `find`
+        // returns `Option<ItemRef<'_, CFType>>`, which derefs to `&CFType`,
+        // giving access to `CFType::downcast` below exactly as originally
+        // written.
+        let windows: CFArray<CFDictionary<CFString, CFType>> =
+            unsafe { CFArray::wrap_under_create_rule(array_ref) };
 
         let owner_key = CFString::from_static_string("kCGWindowOwnerName");
         let name_key = CFString::from_static_string("kCGWindowName");

@@ -45,6 +45,21 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      # Must run BEFORE "Test workspace" — hiddensteps-observation's Linux
+      # tests connect to a real X11 display the moment they start, and
+      # GitHub's ubuntu-latest runners have none by default. (An earlier
+      # version of this workflow started Xvfb *after* the test step, which
+      # predictably made every one of those tests fail with "Connection
+      # refused" — exactly the kind of ordering mistake this workflow's own
+      # first real run exists to catch.)
+      - name: Start a virtual X server (Linux only, for hiddensteps-observation)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+          Xvfb :99 -screen 0 1280x1024x24 &
+          sleep 2
+
       # linux.shortcuts' real-XGrabKey test and hiddensteps-security's
       # real-OS-vault test are both #[ignore]d by design (see their doc
       # comments) — they need a real, currently-focused desktop session, which
@@ -54,18 +69,9 @@ jobs:
         run: cargo test --workspace
         env:
           # Linux runners: hiddensteps-observation's tests need a real X11
-          # display. GitHub's ubuntu-latest runners don't have one by default;
-          # xvfb provides a virtual one so the same real (not mocked) X11
-          # assertions this sandbox ran against WSLg's display run here too.
+          # display — the Xvfb step above provides one; other platforms
+          # ignore this variable entirely.
           DISPLAY: ":99"
-
-      - name: Start a virtual X server (Linux only, for hiddensteps-observation)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y xvfb
-          Xvfb :99 -screen 0 1280x1024x24 &
-          sleep 2
 
   ui:
     name: UI (npm)

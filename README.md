@@ -14,7 +14,7 @@ HiddenSteps is a local-first desktop app that pays attention to your ordinary, r
 
 It is **not** an AI agent. It does not click things, fill in forms, or run scripts on your behalf. It watches, it explains, and then it gets out of the way. What you do with what it finds is entirely up to you — a keyboard shortcut, a five-line script, an n8n flow, an RPA bot, or nothing at all, because sometimes the honest answer is "this isn't worth automating."
 
-That distinction is the whole point. Read [why it matters](docs/research/02-market-gaps-and-differentiation.md) if you want the longer version.
+> Read [why it matters](docs/research/02-market-gaps-and-differentiation.md) if you want the longer version.
 
 ## What it can do
 

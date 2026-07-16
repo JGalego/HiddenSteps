@@ -11,6 +11,14 @@ publish = false
 # crate is the same, already-tested crate the root workspace builds — only the
 # `tauri` glue in `src/main.rs` is unverified.
 
+# Required precisely because this crate is deliberately excluded from the root
+# workspace's `members`: without its own (empty) [workspace] table, Cargo
+# still tries to attach this manifest to the ancestor workspace it finds by
+# directory nesting (../../../Cargo.toml) and fails with "current package
+# believes it's in a workspace when it's not" — a real error CI's first run
+# caught, not a hypothetical one.
+[workspace]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
