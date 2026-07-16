@@ -4,7 +4,14 @@
 
 <h1 align="center">HiddenSteps</h1>
 
-<p align="center"><em>Watches how you work. Tells you what it noticed. Never touches your keyboard.</em></p>
+<p align="center"><em>Watches how you work. Finds the steps you stopped noticing. Never lifts a finger.</em></p>
+
+<p align="center">
+  <a href="https://github.com/JGalego/HiddenSteps/actions/workflows/ci.yml"><img src="https://github.com/JGalego/HiddenSteps/actions/workflows/ci.yml/badge.svg" alt="CI status" /></a>
+  <a href="https://github.com/JGalego/HiddenSteps/releases/latest"><img src="https://img.shields.io/github/v/release/JGalego/HiddenSteps?include_prereleases&label=release" alt="Latest release" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
+  <a href="crates/README.md"><img src="https://img.shields.io/badge/rust%20tests-148%20passing-brightgreen" alt="148 Rust tests passing" /></a>
+</p>
 
 ---
 
@@ -45,19 +52,23 @@ It is **not** an AI agent. It does not click things, fill in forms, or run scrip
 
 Full detail, including exactly what's retained and what could ever leave your device: [docs/design/05-privacy-model.md](docs/design/05-privacy-model.md).
 
-## Status
+## Get it
 
-This is early — the core engine is real, tested, and working; the desktop app around it is partly assembled. Concretely, right now:
+Grab the latest build for your OS from **[Releases](https://github.com/JGalego/HiddenSteps/releases/latest)**:
 
-- ✅ **The Rust core** — observation, redaction, the classify/redact/summarize pipeline, pattern detection, the recommendation engine, local/cloud AI provider clients, the privacy-dispatch gate, a WASM plugin sandbox, and encrypted local storage — is built and **148 automated tests pass**, several against real backends (a live X11 display, real inotify, a real local Ollama model), not just mocks. Details: [crates/README.md](crates/README.md).
-- 🚧 **The desktop app** (Tauri shell + UI) exists as real source wiring the core together, with the onboarding flow, privacy dashboard, recommendations, settings, and diagnostics screens built and tested — but hasn't been packaged into anything installable yet, and the native shell itself hasn't been compiled in this project's dev environment (see below). Details: [apps/desktop/README.md](apps/desktop/README.md).
-- 📋 Signed installers, package-manager listings (Winget, Homebrew, Flatpak), and a real release process don't exist yet.
+| Platform | What to download | First-run note |
+|---|---|---|
+| Windows | the `.exe` or `.msi` installer | SmartScreen will warn about an unrecognized publisher (unsigned build) — click "More info" → "Run anyway" |
+| macOS | the `.dmg` | Gatekeeper will block it — right-click the app → Open, or `xattr -d com.apple.quarantine /path/to/HiddenSteps.app` |
+| Linux | the `.AppImage` (or `.deb`) | `chmod +x` the AppImage, then run it |
 
-If you want the full paper trail — competitive research, architecture decisions, UX wireframes, and the implementation roadmap — it's all in [`docs/`](docs/), and none of it is fluff: every claim in this README traces back to something in there.
+Launch it, and the first-run flow walks you through exactly what it does, what it won't do, and lets you pick a privacy level and an AI provider before anything is observed.
+
+This is an early, unsigned, prerelease build — see [CHANGELOG.md](CHANGELOG.md) for what's in it and what's known to still be missing. If you want the paper trail behind it — competitive research, architecture decisions, UX wireframes, the implementation roadmap — it's all in [`docs/`](docs/), and every claim in this README traces back to something in there.
 
 ## Building it yourself
 
-There's no downloadable release yet, so "installing" HiddenSteps today means building it from source. Two independent pieces, with different requirements:
+Prefer to build from source, or want to contribute? Two independent pieces:
 
 ### 1. The Rust core (works anywhere Rust does — no extra setup)
 
@@ -75,24 +86,16 @@ cargo test -p hiddensteps-llm-provider -- --ignored
 
 ### 2. The desktop app
 
-The UI builds and tests cleanly on its own:
-
 ```sh
-cd apps/desktop/ui
-npm install
-npm test          # 26 tests, real jsdom rendering
-npm run dev        # dev server on http://localhost:1420
+cd apps/desktop/ui && npm install && npm test   # 26 tests, real jsdom rendering
 ```
 
-The native shell needs [Tauri's platform prerequisites](https://tauri.app/start/prerequisites/) — on Linux specifically, `webkit2gtk-4.1` and friends via your package manager (this is the one thing this project's own dev sandbox couldn't install, so it's never actually been built — see [apps/desktop/README.md](apps/desktop/README.md) for the honest story):
+The native shell needs [Tauri's platform prerequisites](https://tauri.app/start/prerequisites/) (on Linux: `webkit2gtk-4.1` and friends via your package manager) — verified building on all three OSes in [CI](.github/workflows/ci.yml):
 
 ```sh
-cd apps/desktop/src-tauri
-cargo build
+cd apps/desktop/src-tauri && cargo build
 # once it builds: `cargo tauri dev` from apps/desktop/, with the ui/ dev server running
 ```
-
-If you get it running somewhere, [an issue or PR](https://github.com/JGalego/HiddenSteps/issues) reporting what broke (or that nothing did) is genuinely useful — this would be the first real compile.
 
 ## How it's built
 
@@ -106,13 +109,13 @@ docs/
   roadmap/    Milestones, technology choices, testing strategy, security/privacy/performance test plans
 crates/       The Rust core — see crates/README.md for exactly what's built and how it's verified
 apps/desktop/ The Tauri shell + React/TypeScript UI — see apps/desktop/README.md
-.github/workflows/ci.yml  Cross-platform build/test, including the first real compile of the pieces this
-                          dev environment couldn't verify itself
+.github/workflows/ci.yml       Cross-platform build/test on every push (Linux, macOS, Windows)
+.github/workflows/release.yml  Builds and publishes installers to GitHub Releases on a version tag
 ```
 
 ## Contributing
 
-Genuinely welcome, especially: running the CI-untested pieces (macOS/Windows builds, the Tauri shell) on a real machine and reporting back; a real design pass on the app icon; and filling in any of the disclosed gaps listed throughout `crates/README.md` and `apps/desktop/*/README.md`.
+Genuinely welcome, especially: actually running a release build day-to-day and reporting back what breaks; a real design pass on the app icon; signing/notarization setup (there is none yet — see the release notes); and filling in any of the disclosed gaps listed throughout `crates/README.md` and `apps/desktop/*/README.md`.
 
 ## License
 
