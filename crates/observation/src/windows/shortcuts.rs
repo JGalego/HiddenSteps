@@ -137,7 +137,7 @@ impl GlobalShortcutSource {
                 break;
             }
             if msg.message == WM_HOTKEY {
-                let index = msg.wParam.0 as usize;
+                let index = msg.wParam.0;
                 if let Some(binding) = bindings.get(index) {
                     let _ = fired_tx.send(binding.label.clone());
                 }
