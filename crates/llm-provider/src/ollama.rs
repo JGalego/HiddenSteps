@@ -36,6 +36,8 @@ struct GenerateRequest<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     system: Option<&'a str>,
     stream: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    think: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -73,6 +75,7 @@ impl LlmProvider for OllamaProvider {
             prompt: &request.prompt,
             system: request.system.as_deref(),
             stream: false,
+            think: request.think,
         };
         let response = self
             .client
@@ -155,6 +158,7 @@ mod tests {
                 system: Some("You are a workflow analyst.".to_string()),
                 prompt: "why do I keep copying this field?".to_string(),
                 max_tokens: None,
+                think: None,
             })
             .await
             .unwrap();
@@ -196,6 +200,7 @@ mod tests {
                 system: None,
                 prompt: "test".to_string(),
                 max_tokens: None,
+                think: None,
             })
             .await;
 

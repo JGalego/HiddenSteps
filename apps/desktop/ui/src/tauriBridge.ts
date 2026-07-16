@@ -48,7 +48,90 @@ export interface Recommendation {
   dismissal_reason: string | null;
 }
 
+export interface OnboardingState {
+  completed: boolean;
+}
+
+export interface DetectedRuntime {
+  name: string;
+  reachable: boolean;
+}
+
+export interface TestProviderConnectivityResponse {
+  ok: boolean;
+  error: string | null;
+}
+
+export interface LlmProviderConfig {
+  id: string;
+  provider_type: string;
+  is_local: boolean;
+  model_name: string | null;
+  endpoint: string | null;
+  vault_key_ref: string | null;
+  active: boolean;
+}
+
+export interface Diagnostics {
+  privacy_level: number;
+  observation_active: boolean;
+  active_provider: LlmProviderConfig | null;
+  event_count: number;
+  pattern_count: number;
+  recommendation_count: number;
+  audit_log_count: number;
+  storage_bytes: number | null;
+  encryption_status: string;
+}
+
+export interface AuditEntry {
+  id: number | null;
+  occurred_at: string;
+  actor: "user" | "system";
+  action_type: string;
+  details: Record<string, unknown>;
+}
+
 export const tauriBridge = {
+  getOnboardingState: (): Promise<OnboardingState> => invoke("get_onboarding_state"),
+
+  getProviderDetection: (): Promise<DetectedRuntime[]> => invoke("get_provider_detection"),
+
+  testProviderConnectivity: (request: {
+    provider_type: string;
+    endpoint?: string;
+    api_key?: string;
+    model?: string;
+  }): Promise<TestProviderConnectivityResponse> =>
+    invoke("test_provider_connectivity", { request }),
+
+  setAiProvider: (request: {
+    id: string;
+    provider_type: string;
+    is_local: boolean;
+    model_name?: string;
+    endpoint?: string;
+    api_key?: string;
+  }): Promise<boolean> => invoke("set_ai_provider", { request }),
+
+  listLlmProviders: (): Promise<LlmProviderConfig[]> => invoke("list_llm_providers"),
+
+  setPrivacyLevel: (level: number, acknowledgedPermissions: string[] = []): Promise<{ effective_level: number }> =>
+    invoke("set_privacy_level", {
+      request: { level, acknowledged_permissions: acknowledgedPermissions },
+    }),
+
+  completeOnboarding: (): Promise<boolean> => invoke("complete_onboarding"),
+
+  getSettings: (key: string): Promise<unknown> => invoke("get_settings", { key }),
+
+  updateSettings: (key: string, value: unknown): Promise<boolean> =>
+    invoke("update_settings", { key, value }),
+
+  getDiagnostics: (): Promise<Diagnostics> => invoke("get_diagnostics"),
+
+  getAuditLog: (limit: number): Promise<AuditEntry[]> => invoke("get_audit_log", { limit }),
+
   getObservationStatus: (): Promise<PrivacyState> => invoke("get_observation_status"),
 
   pauseObservation: (): Promise<boolean> => invoke("pause_observation"),

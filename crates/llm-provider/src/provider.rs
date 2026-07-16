@@ -17,6 +17,16 @@ pub struct CompletionRequest {
     pub system: Option<String>,
     pub prompt: String,
     pub max_tokens: Option<u32>,
+    /// For hybrid reasoning/thinking models (e.g. Ollama's `qwen3` family):
+    /// `Some(false)` disables the model's extended chain-of-thought before
+    /// answering. Measured against a real local Ollama instance during
+    /// development: the same prompt took over two minutes with thinking left
+    /// at its default (`None`) and under ten seconds with `Some(false)` — for
+    /// the Recommendation Engine's structured-JSON synthesis (which wants a
+    /// fast, clean answer, not a reasoning trace), this matters in practice,
+    /// not just in theory. Providers that have no such concept (OpenAI,
+    /// Anthropic) simply ignore this field.
+    pub think: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

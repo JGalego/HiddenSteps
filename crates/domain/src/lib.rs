@@ -7,6 +7,7 @@
 mod audit;
 mod captured_signal;
 mod event;
+mod llm_provider_config;
 mod pattern;
 mod privacy;
 mod recommendation;
@@ -14,6 +15,7 @@ mod recommendation;
 pub use audit::{AuditActor, AuditEntry};
 pub use captured_signal::{CapturedPayload, CapturedSignal};
 pub use event::{EventSummary, SignalType};
+pub use llm_provider_config::LlmProviderConfig;
 pub use pattern::{Pattern, PatternStatus};
 pub use privacy::{PrivacyLevel, PrivacyLevelError, PrivacyState};
 pub use recommendation::{

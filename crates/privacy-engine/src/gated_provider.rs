@@ -118,6 +118,7 @@ mod tests {
             system: None,
             prompt: "test".to_string(),
             max_tokens: None,
+            think: None,
         }
     }
 

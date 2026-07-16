@@ -2,8 +2,9 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use hiddensteps_domain::{
-    Alternative, AuditActor, AuditEntry, EventSummary, Level, Pattern, PatternStatus, PrivacyLevel,
-    PrivacyState, Recommendation, RecommendationCategory, RecommendationStatus, SignalType,
+    Alternative, AuditActor, AuditEntry, EventSummary, Level, LlmProviderConfig, Pattern,
+    PatternStatus, PrivacyLevel, PrivacyState, Recommendation, RecommendationCategory,
+    RecommendationStatus, SignalType,
 };
 use rusqlite::{params, Connection, OptionalExtension};
 use time::OffsetDateTime;
@@ -500,6 +501,126 @@ impl SqlCipherEventStore {
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(EventStoreError::from)
     }
+
+    // --- LLM provider configuration (never the secret itself — see
+    // `LlmProviderConfig::vault_key_ref`'s doc comment) ---
+
+    pub fn upsert_llm_provider(&self, provider: &LlmProviderConfig) -> Result<(), EventStoreError> {
+        let conn = self.conn.lock().expect("event store mutex poisoned");
+        conn.execute(
+            "INSERT INTO llm_providers (id, provider_type, is_local, model_name, endpoint, vault_key_ref, active)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT(id) DO UPDATE SET
+                provider_type = excluded.provider_type,
+                is_local = excluded.is_local,
+                model_name = excluded.model_name,
+                endpoint = excluded.endpoint,
+                vault_key_ref = excluded.vault_key_ref,
+                active = excluded.active",
+            params![
+                provider.id,
+                provider.provider_type,
+                provider.is_local,
+                provider.model_name,
+                provider.endpoint,
+                provider.vault_key_ref,
+                provider.active,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_llm_providers(&self) -> Result<Vec<LlmProviderConfig>, EventStoreError> {
+        let conn = self.conn.lock().expect("event store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, provider_type, is_local, model_name, endpoint, vault_key_ref, active FROM llm_providers",
+        )?;
+        let rows = stmt.query_map([], row_to_llm_provider)?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(EventStoreError::from)
+    }
+
+    /// Marks exactly one provider active, deactivating every other row —
+    /// there is never more than one active provider at a time (the
+    /// Recommendation Engine and Embedding Layer each read a single active
+    /// provider, per ADR-0004).
+    pub fn set_active_llm_provider(&self, provider_id: &str) -> Result<(), EventStoreError> {
+        let conn = self.conn.lock().expect("event store mutex poisoned");
+        let updated = conn.execute(
+            "UPDATE llm_providers SET active = (id = ?1)",
+            params![provider_id],
+        )?;
+        if updated == 0 {
+            return Err(EventStoreError::InvalidStoredValue(format!(
+                "no llm_providers row to update (provider '{provider_id}' not registered?)"
+            )));
+        }
+        Ok(())
+    }
+
+    pub fn get_active_llm_provider(&self) -> Result<Option<LlmProviderConfig>, EventStoreError> {
+        let conn = self.conn.lock().expect("event store mutex poisoned");
+        conn.query_row(
+            "SELECT id, provider_type, is_local, model_name, endpoint, vault_key_ref, active
+             FROM llm_providers WHERE active = 1",
+            [],
+            row_to_llm_provider,
+        )
+        .optional()
+        .map_err(EventStoreError::from)
+    }
+
+    // --- generic settings (UI complexity tier, notification frequency, ...) ---
+
+    pub fn get_setting(&self, key: &str) -> Result<Option<serde_json::Value>, EventStoreError> {
+        let conn = self.conn.lock().expect("event store mutex poisoned");
+        let value: Option<String> = conn
+            .query_row(
+                "SELECT value_json FROM settings WHERE key = ?1",
+                params![key],
+                |row| row.get(0),
+            )
+            .optional()?;
+        value
+            .map(|v| serde_json::from_str(&v).map_err(EventStoreError::Serialization))
+            .transpose()
+    }
+
+    pub fn set_setting(&self, key: &str, value: &serde_json::Value) -> Result<(), EventStoreError> {
+        let conn = self.conn.lock().expect("event store mutex poisoned");
+        conn.execute(
+            "INSERT INTO settings (key, value_json) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json",
+            params![key, serde_json::to_string(value)?],
+        )?;
+        Ok(())
+    }
+
+    // --- diagnostics support ---
+
+    pub fn count_rows(&self, table: &str) -> Result<i64, EventStoreError> {
+        // `table` is always one of a small set of hardcoded literals passed by
+        // this crate's own callers (see `hiddensteps-desktop`'s diagnostics
+        // command) — never user/network input — so building the identifier
+        // into the SQL text directly is safe here; `rusqlite` has no
+        // parameter-binding form for identifiers.
+        const ALLOWED: &[&str] = &[
+            "event_summaries",
+            "patterns",
+            "recommendations",
+            "audit_log",
+        ];
+        if !ALLOWED.contains(&table) {
+            return Err(EventStoreError::InvalidStoredValue(format!(
+                "count_rows: '{table}' is not in the allowed table list"
+            )));
+        }
+        let conn = self.conn.lock().expect("event store mutex poisoned");
+        conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+            row.get(0)
+        })
+        .map_err(EventStoreError::from)
+    }
 }
 
 fn apply_key(conn: &Connection, key: &[u8; 32]) -> Result<(), EventStoreError> {
@@ -822,6 +943,18 @@ fn row_to_recommendation(row: &rusqlite::Row<'_>) -> rusqlite::Result<Recommenda
         generating_provider,
         status: recommendation_status_from_str(&status).map_err(map_err)?,
         dismissal_reason,
+    })
+}
+
+fn row_to_llm_provider(row: &rusqlite::Row<'_>) -> rusqlite::Result<LlmProviderConfig> {
+    Ok(LlmProviderConfig {
+        id: row.get(0)?,
+        provider_type: row.get(1)?,
+        is_local: row.get(2)?,
+        model_name: row.get(3)?,
+        endpoint: row.get(4)?,
+        vault_key_ref: row.get(5)?,
+        active: row.get(6)?,
     })
 }
 
@@ -1233,5 +1366,121 @@ mod tests {
             .find_similar_patterns(&[1.0, 0.0], 10)
             .unwrap()
             .is_empty());
+    }
+
+    fn sample_provider(id: &str, active: bool) -> LlmProviderConfig {
+        LlmProviderConfig {
+            id: id.to_string(),
+            provider_type: "ollama".to_string(),
+            is_local: true,
+            model_name: Some("qwen3:0.6b".to_string()),
+            endpoint: Some("http://localhost:11434".to_string()),
+            vault_key_ref: None,
+            active,
+        }
+    }
+
+    #[test]
+    fn llm_provider_round_trips_and_lists() {
+        let store = SqlCipherEventStore::open_in_memory(&test_key()).unwrap();
+        store
+            .upsert_llm_provider(&sample_provider("ollama-local", true))
+            .unwrap();
+
+        let providers = store.list_llm_providers().unwrap();
+        assert_eq!(providers.len(), 1);
+        assert_eq!(providers[0].id, "ollama-local");
+        assert!(providers[0].active);
+    }
+
+    #[test]
+    fn only_one_llm_provider_is_ever_active_at_once() {
+        let store = SqlCipherEventStore::open_in_memory(&test_key()).unwrap();
+        store
+            .upsert_llm_provider(&sample_provider("ollama-local", true))
+            .unwrap();
+        store
+            .upsert_llm_provider(&sample_provider("openai-cloud", false))
+            .unwrap();
+
+        store.set_active_llm_provider("openai-cloud").unwrap();
+
+        let active = store.get_active_llm_provider().unwrap().unwrap();
+        assert_eq!(active.id, "openai-cloud");
+        let providers = store.list_llm_providers().unwrap();
+        assert_eq!(providers.iter().filter(|p| p.active).count(), 1);
+    }
+
+    #[test]
+    fn set_active_llm_provider_on_an_unregistered_id_errors_rather_than_silently_no_op() {
+        let store = SqlCipherEventStore::open_in_memory(&test_key()).unwrap();
+        assert!(store.set_active_llm_provider("does-not-exist").is_err());
+    }
+
+    #[test]
+    fn get_active_llm_provider_is_none_when_nothing_is_registered() {
+        let store = SqlCipherEventStore::open_in_memory(&test_key()).unwrap();
+        assert_eq!(store.get_active_llm_provider().unwrap(), None);
+    }
+
+    #[test]
+    fn upserting_a_provider_twice_updates_rather_than_duplicates() {
+        let store = SqlCipherEventStore::open_in_memory(&test_key()).unwrap();
+        store
+            .upsert_llm_provider(&sample_provider("ollama-local", true))
+            .unwrap();
+        let mut updated = sample_provider("ollama-local", true);
+        updated.model_name = Some("llama3.1:8b".to_string());
+        store.upsert_llm_provider(&updated).unwrap();
+
+        let providers = store.list_llm_providers().unwrap();
+        assert_eq!(providers.len(), 1);
+        assert_eq!(providers[0].model_name, Some("llama3.1:8b".to_string()));
+    }
+
+    #[test]
+    fn setting_round_trips_arbitrary_json() {
+        let store = SqlCipherEventStore::open_in_memory(&test_key()).unwrap();
+        assert_eq!(store.get_setting("ui.complexity_tier").unwrap(), None);
+
+        store
+            .set_setting("ui.complexity_tier", &serde_json::json!("intermediate"))
+            .unwrap();
+        assert_eq!(
+            store.get_setting("ui.complexity_tier").unwrap(),
+            Some(serde_json::json!("intermediate"))
+        );
+
+        // Overwrite, not duplicate.
+        store
+            .set_setting("ui.complexity_tier", &serde_json::json!("advanced"))
+            .unwrap();
+        assert_eq!(
+            store.get_setting("ui.complexity_tier").unwrap(),
+            Some(serde_json::json!("advanced"))
+        );
+    }
+
+    #[test]
+    fn count_rows_reflects_real_inserted_data() {
+        let store = SqlCipherEventStore::open_in_memory(&test_key()).unwrap();
+        assert_eq!(store.count_rows("event_summaries").unwrap(), 0);
+        store
+            .insert_event_summary(&EventSummary::new(
+                OffsetDateTime::now_utc(),
+                "src",
+                SignalType::AppFocusChange,
+                PrivacyLevel::ApplicationMetadata,
+                serde_json::json!({ "app": "Terminal" }),
+                None,
+            ))
+            .unwrap();
+        assert_eq!(store.count_rows("event_summaries").unwrap(), 1);
+    }
+
+    #[test]
+    fn count_rows_rejects_a_table_name_outside_the_allowlist() {
+        let store = SqlCipherEventStore::open_in_memory(&test_key()).unwrap();
+        assert!(store.count_rows("sqlite_master").is_err());
     }
 }

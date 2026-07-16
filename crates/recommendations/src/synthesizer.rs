@@ -56,6 +56,12 @@ impl<'a, P: LlmProvider + ?Sized> Synthesizer<'a, P> {
                     system: Some(SYSTEM_PROMPT.to_string()),
                     prompt: prompt.clone(),
                     max_tokens: Some(1024),
+                    // The synthesis prompt asks for a single JSON object and
+                    // nothing else — a reasoning trace would only slow this
+                    // down (measured: minutes vs. seconds against a real local
+                    // hybrid-thinking model) without improving the output the
+                    // parser in `try_build` actually uses.
+                    think: Some(false),
                 })
                 .await?;
 

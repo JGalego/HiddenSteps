@@ -41,7 +41,7 @@ fn resolve_master_key(secret_store: &KeyringSecretStore) -> [u8; 32] {
     key
 }
 
-fn data_dir() -> std::path::PathBuf {
+pub(crate) fn data_dir() -> std::path::PathBuf {
     dirs_next_data_dir().join("hiddensteps.db")
 }
 
@@ -82,7 +82,11 @@ fn main() {
     tauri::Builder::default()
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![
+            commands::get_onboarding_state,
             commands::get_provider_detection,
+            commands::test_provider_connectivity,
+            commands::list_llm_providers,
+            commands::set_ai_provider,
             commands::set_privacy_level,
             commands::complete_onboarding,
             commands::get_observation_status,
@@ -96,7 +100,10 @@ fn main() {
             commands::list_recommendations,
             commands::get_recommendation_detail,
             commands::set_recommendation_status,
+            commands::get_settings,
+            commands::update_settings,
             commands::get_audit_log,
+            commands::get_diagnostics,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the HiddenSteps Tauri application");

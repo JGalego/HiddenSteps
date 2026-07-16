@@ -155,6 +155,7 @@ mod tests {
                 system: Some("You are a workflow analyst.".to_string()),
                 prompt: "what should I automate?".to_string(),
                 max_tokens: Some(512),
+                think: None,
             })
             .await
             .unwrap();
