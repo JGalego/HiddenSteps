@@ -1,0 +1,16 @@
+[package]
+name = "hiddensteps-security"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+keyring = "3"
+rand = "0.8"
+argon2 = "0.5"
+base64 = "0.22"
+
+[dev-dependencies]
+tempfile = "3"

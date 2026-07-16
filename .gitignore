@@ -1,0 +1,15 @@
+/target
+**/target
+Cargo.lock.bak
+
+# Tauri/Node (future UI work)
+node_modules/
+dist/
+
+# Editor/OS cruft
+.DS_Store
+*.swp
+
+# Local encrypted profiles a dev might create while running the app manually
+*.db
+*.db-journal
