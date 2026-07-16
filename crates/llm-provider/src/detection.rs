@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+use serde::Serialize;
+
 /// A local runtime worth probing for at onboarding (FR-14): its display name and
 /// the URL of an endpoint that, if reachable and returning success, proves the
 /// runtime is actually running (not just that some webserver happens to be on
@@ -9,7 +11,13 @@ pub struct RuntimeCandidate {
     pub probe_url: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+/// `Serialize` is required here, not decorative: this crosses the Tauri IPC
+/// boundary as `get_provider_detection`'s return type
+/// (`apps/desktop/src-tauri/src/commands.rs`), and `#[tauri::command]`
+/// requires its return type to be serializable — a real compile error this
+/// crate's own local `cargo build` could never catch, since it doesn't depend
+/// on `tauri` at all.
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct DetectedRuntime {
     pub name: &'static str,
     pub reachable: bool,

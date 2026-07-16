@@ -35,7 +35,7 @@ hiddensteps-enterprise-policy = { path = "../../../crates/enterprise-policy" }
 hiddensteps-plugin-host = { path = "../../../crates/plugin-host" }
 hiddensteps-observation = { path = "../../../crates/observation" }
 
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

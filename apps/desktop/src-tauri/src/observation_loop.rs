@@ -1,10 +1,21 @@
 use std::sync::Arc;
-use std::time::Duration;
 
-use hiddensteps_domain::PrivacyLevel;
 use hiddensteps_event_store::SqlCipherEventStore;
+use tauri::AppHandle;
+
+// Everything below is used only inside the `#[cfg(target_os = "linux")]`
+// branch of `run` — gating the imports too avoids "unused import" warnings on
+// macOS/Windows, where that branch compiles out entirely (real warnings CI's
+// first run surfaced, not hypothetical ones).
+#[cfg(target_os = "linux")]
+use std::time::Duration;
+#[cfg(target_os = "linux")]
+use hiddensteps_domain::PrivacyLevel;
+#[cfg(target_os = "linux")]
 use hiddensteps_pipeline::{EventPipeline, PipelineOutcome};
-use tauri::{AppHandle, Emitter};
+#[cfg(target_os = "linux")]
+use tauri::Emitter;
+#[cfg(target_os = "linux")]
 use time::OffsetDateTime;
 
 /// The real capture → pipeline → store → UI-event loop

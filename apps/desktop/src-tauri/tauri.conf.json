@@ -29,8 +29,14 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["msi", "dmg", "appimage"],
-    "icon": ["icons/icon.png"],
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
     "category": "Utility",
     "shortDescription": "A local-first workflow intelligence tool",
     "longDescription": "HiddenSteps observes how you work, at a privacy level you choose, and explains where your effort is going and what your options are for getting it back — without automating anything on your behalf by default."
