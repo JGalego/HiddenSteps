@@ -9,7 +9,7 @@ publish.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-wasmtime = { version = "43", default-features = false, features = ["cranelift", "runtime"] }
+wasmtime = { version = "47", default-features = false, features = ["cranelift", "runtime"] }
 
 [dev-dependencies]
 wat = "1"
