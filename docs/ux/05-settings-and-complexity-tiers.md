@@ -2,6 +2,13 @@
 
 Implements FR-18: three complexity tiers gate *UI surface area*, not *capability* — every setting an Advanced user can reach, a Beginner user's account can also reach (via "Show advanced settings"), just not by default.
 
+> **Implementation note (v0.1.x).** The three-tier complexity filter described
+> here is **not implemented** — the shipped `SettingsPage` shows one fixed view
+> (the Beginner-visible subset, which is the correct default either way). The
+> Plugins IA below is design-only; plugin management isn't built (see
+> [08-plugin-architecture.md](../design/08-plugin-architecture.md)'s note and
+> [`../../apps/desktop/ui/README.md`](../../apps/desktop/ui/README.md)).
+
 ## Information architecture
 
 ```

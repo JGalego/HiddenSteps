@@ -101,16 +101,21 @@ export function App() {
               {recommendationsError}
             </p>
           )}
-          {recommendations.length === 0 && (
-            <p>Still learning your patterns. Nothing has repeated often enough yet to suggest a change.</p>
-          )}
-          {recommendations.map((rec) => (
-            <RecommendationCard
-              key={rec.id}
-              recommendation={rec}
-              onStatusChange={refreshRecommendations}
-            />
-          ))}
+          {/* aria-live="polite" per docs/ux/06-accessibility.md §1: a new
+              recommendation is not an emergency and should not seize focus or
+              interrupt a screen-reader user — it's announced, not forced. */}
+          <div aria-live="polite">
+            {recommendations.length === 0 && (
+              <p>Still learning your patterns. Nothing has repeated often enough yet to suggest a change.</p>
+            )}
+            {recommendations.map((rec) => (
+              <RecommendationCard
+                key={rec.id}
+                recommendation={rec}
+                onStatusChange={refreshRecommendations}
+              />
+            ))}
+          </div>
         </section>
       )}
 

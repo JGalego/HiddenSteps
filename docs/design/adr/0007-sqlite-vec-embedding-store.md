@@ -1,6 +1,19 @@
 # ADR-0007: `sqlite-vec` in-process vector search over summary embeddings
 
-Status: Accepted
+Status: Accepted (decision) — **shipped implementation deviates; see the note below**
+
+> **Implementation note (current, as of v0.1.x).** The shipped
+> `hiddensteps-event-store` does **not** load the `sqlite-vec` native
+> extension. Embeddings are stored as plain `BLOB`s in the SQLCipher file and
+> similarity is computed in Rust (brute-force cosine). This was a deliberate,
+> disclosed simplification — loading a native SQLite extension wasn't
+> verifiable in the build environment — and it has the *same semantics* this
+> ADR accepts: at a single user's realistic volume, `sqlite-vec` itself does
+> brute-force exact search (see the Consequences below). The decision to keep
+> embeddings inside the one encrypted file, embedding only summaries, is
+> unchanged; only the mechanism differs. `crates/README.md` is the ground
+> truth for what's built. Moving to the real `sqlite-vec` extension is a
+> drop-in swap behind the same store API, not an architecture change.
 
 ## Context
 

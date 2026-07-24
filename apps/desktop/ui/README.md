@@ -16,6 +16,7 @@ TypeScript/React frontend (ADR-0001), communicating with the Rust core exclusive
 - **Exclusion rules** and **plugin management** UI don't exist — the schema/backend work for per-app/per-domain exclusion rules wasn't built this milestone either (a real gap, not just a missing screen).
 - **Progressive complexity tiers** (Beginner/Intermediate/Advanced, [`docs/ux/05-settings-and-complexity-tiers.md`](../../../docs/ux/05-settings-and-complexity-tiers.md)) aren't implemented as a display filter — `SettingsPage` currently shows one fixed view.
 - Navigation is plain tab-button state, not the richer chrome the UX docs imply (no keyboard-shortcut-driven dashboard access, no tray-icon integration on the UI side).
+- **Accessibility** ([`docs/ux/06-accessibility.md`](../../../docs/ux/06-accessibility.md)): the concrete, testable pieces are implemented — `aria-live="polite"` on the recent-events feed and the recommendations region, focus management for the delete-all dialog (Cancel focused on open, focus restored to the trigger on close, Esc-to-cancel) and onboarding step changes, `prefers-reduced-motion` support, and an **axe-core automated gate** (`src/a11y.test.tsx`, zero violations across the shipped screens, run by `npm test`). Still deferred: full **string externalization / i18n** (§4 — every string is currently inlined in JSX; only English ships, so this is additive infrastructure not yet added, not a regression) and the **build-time WCAG contrast-ratio check** across a dedicated **high-contrast theme** (§3 — the light/dark themes exist; the high-contrast theme and the automated contrast check don't yet).
 
 ## Running this yourself
 
@@ -27,4 +28,4 @@ npm run build    # production build (used by `../src-tauri`'s beforeBuildCommand
 npm run dev      # dev server on :1420 (used by `../src-tauri`'s beforeDevCommand)
 ```
 
-All of the above were actually run in this repository's dev environment as part of building this UI — unlike `../src-tauri`, nothing here required a system dependency this sandbox lacked. Current count: 46 tests across 7 test files, all passing.
+All of the above were actually run in this repository's dev environment as part of building this UI — unlike `../src-tauri`, nothing here required a system dependency this sandbox lacked. Current count: 50 tests across 8 test files, all passing.

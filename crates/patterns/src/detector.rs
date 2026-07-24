@@ -344,12 +344,9 @@ mod tests {
         // real number of non-overlapping repetitions of this 2-step shape is
         // 3 — the same numbers a recommendation's "you did this N times"
         // narrative and estimated-time-saved figure are computed from.
-        let mut events = Vec::new();
-        let mut id = 1;
-        for minute in 0..6 {
-            events.push(event_at(minute, "jira", SignalType::AppActionEvent, id));
-            id += 1;
-        }
+        let events: Vec<_> = (0..6)
+            .map(|minute| event_at(minute, "jira", SignalType::AppActionEvent, minute + 1))
+            .collect();
         let detector = PatternDetector::new(2..=2, 3);
         let detected = detector.detect(&events);
 

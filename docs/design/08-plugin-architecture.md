@@ -2,6 +2,16 @@
 
 Implements PROMPT.md's "everything should be pluggable" requirement across observation, LLM/embedding providers, automation providers, enterprise policies, recommendation engines, pattern detectors, and integrations, on the WASM sandbox committed in ADR-0009.
 
+> **Implementation note (v0.1.x).** Only the *sandbox engine* is built and
+> tested (`hiddensteps-plugin-host`: closed capability enum, manifest
+> validation, `wasmtime` isolation with resource limits, `instantiate_from_manifest`).
+> The install / grant / revoke / list *lifecycle* and distribution described
+> below — and the plugin-management UI — are **not implemented**; there is no
+> shipped example plugin. This doc is the target design; see
+> [`../../crates/README.md`](../../crates/README.md) and
+> [`../../apps/desktop/ui/README.md`](../../apps/desktop/ui/README.md) for what
+> exists.
+
 ## 1. Plugin types
 
 | Plugin type | Extends | Example |
