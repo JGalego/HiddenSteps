@@ -614,11 +614,31 @@ pub async fn set_cloud_consent(state: State<'_, AppState>, granted: bool) -> Res
 
 // --- Settings ---
 
+/// The only setting keys the generic get/update commands may touch. The
+/// settings table is a genuine key/value store, but exposing arbitrary
+/// key access across the IPC boundary would let any webview code (or a
+/// future plugin) read or clobber any key — including ones other commands
+/// treat as trusted, like cloud-consent. Every key a UI legitimately needs
+/// belongs on this list; anything else is a bug or an attempt to reach
+/// somewhere it shouldn't, and is rejected rather than silently served.
+const ALLOWED_SETTING_KEYS: &[&str] = &[CLOUD_CONSENT_SETTING_KEY];
+
+fn check_setting_key(key: &str) -> Result<(), String> {
+    if ALLOWED_SETTING_KEYS.contains(&key) {
+        Ok(())
+    } else {
+        Err(format!(
+            "setting key '{key}' is not accessible via this command"
+        ))
+    }
+}
+
 #[tauri::command]
 pub async fn get_settings(
     state: State<'_, AppState>,
     key: String,
 ) -> Result<Option<serde_json::Value>, String> {
+    check_setting_key(&key)?;
     state.store.get_setting(&key).map_err(to_err)
 }
 
@@ -628,6 +648,7 @@ pub async fn update_settings(
     key: String,
     value: serde_json::Value,
 ) -> Result<bool, String> {
+    check_setting_key(&key)?;
     state.store.set_setting(&key, &value).map_err(to_err)?;
     Ok(true)
 }
