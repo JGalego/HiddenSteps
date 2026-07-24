@@ -14,6 +14,7 @@ use hiddensteps_privacy_engine::{DispatchDecision, PrivacyGatedProvider};
 use hiddensteps_recommendations::Synthesizer;
 use hiddensteps_security::{KeyringSecretStore, SecretStore};
 use tauri::{AppHandle, Emitter, Manager};
+use time::OffsetDateTime;
 
 use crate::VAULT_SERVICE;
 
@@ -44,6 +45,31 @@ pub async fn run(app: AppHandle, store: Arc<SqlCipherEventStore>) {
 }
 
 async fn sweep_once(app: &AppHandle, store: &SqlCipherEventStore) -> Result<(), String> {
+    // Deep-mode's TTL (`docs/design/05-privacy-model.md` §2) was, until now,
+    // metadata computed and persisted per event but never actually acted on
+    // — nothing ever deleted a row once its `ttl_expires_at` passed. Piggy-
+    // backing this on the same periodic sweep that already runs pattern
+    // detection means Deep-mode retention gets enforced on the same
+    // real-world cadence (every `SWEEP_INTERVAL`) without a second
+    // background task.
+    match store.delete_expired_events(OffsetDateTime::now_utc()) {
+        Ok(count) if count > 0 => {
+            let _ = store.append_audit_entry(&AuditEntry::new(
+                AuditActor::System,
+                "deep_mode_ttl_expired_events_deleted",
+                serde_json::json!({ "count": count }),
+            ));
+        }
+        Ok(_) => {}
+        Err(e) => {
+            let _ = store.append_audit_entry(&AuditEntry::new(
+                AuditActor::System,
+                "deep_mode_ttl_sweep_error",
+                serde_json::json!({ "error": e.to_string() }),
+            ));
+        }
+    }
+
     let privacy_state = store.get_privacy_state().map_err(|e| e.to_string())?;
 
     // `list_recent_events` returns newest-first; `PatternDetector` requires

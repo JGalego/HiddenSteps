@@ -245,6 +245,23 @@ impl SqlCipherEventStore {
         Ok(stmt.execute(params.as_slice())?)
     }
 
+    /// Deletes every event whose Deep-mode retention window
+    /// (`ttl_expires_at`, set by `hiddensteps_pipeline` per
+    /// `docs/design/05-privacy-model.md` §2) has passed. `ttl_expires_at`
+    /// has been computed and persisted for Deep-mode events since this
+    /// store's first version, but nothing ever called this before — raw
+    /// observations should expire quickly by design, and until this method
+    /// existed and was called by something, they never actually did.
+    pub fn delete_expired_events(&self, now: OffsetDateTime) -> Result<usize, EventStoreError> {
+        let conn = self.conn.lock().expect("event store mutex poisoned");
+        let count = conn.execute(
+            "DELETE FROM event_summaries
+             WHERE ttl_expires_at IS NOT NULL AND ttl_expires_at <= ?1",
+            params![to_rfc3339(now)],
+        )?;
+        Ok(count)
+    }
+
     // --- audit log (FR-8, `docs/design/06-security-architecture.md` §4) ---
 
     pub fn append_audit_entry(&self, entry: &AuditEntry) -> Result<i64, EventStoreError> {
@@ -1250,6 +1267,60 @@ mod tests {
         let remaining = store.list_recent_events(10).unwrap();
         assert_eq!(remaining.len(), 2);
         assert!(remaining.iter().all(|e| e.id != Some(ids[0])));
+    }
+
+    #[test]
+    fn delete_expired_events_removes_only_events_past_their_ttl() {
+        // Regression test: ttl_expires_at has been computed and persisted for
+        // Deep-mode events since v0.1.0, but nothing ever called a sweep to
+        // actually delete rows past it — the Deep-mode retention promise was
+        // metadata-only.
+        let store = SqlCipherEventStore::open_in_memory(&test_key()).unwrap();
+        let now = OffsetDateTime::now_utc();
+
+        let expired_id = store
+            .insert_event_summary(&EventSummary::new(
+                now,
+                "src",
+                SignalType::OcrText,
+                PrivacyLevel::MaximumAssistance,
+                serde_json::json!({}),
+                Some(now - time::Duration::days(1)),
+            ))
+            .unwrap();
+        let not_yet_expired_id = store
+            .insert_event_summary(&EventSummary::new(
+                now,
+                "src",
+                SignalType::OcrText,
+                PrivacyLevel::MaximumAssistance,
+                serde_json::json!({}),
+                Some(now + time::Duration::days(89)),
+            ))
+            .unwrap();
+        let no_ttl_id = store
+            .insert_event_summary(&EventSummary::new(
+                now,
+                "src",
+                SignalType::AppFocusChange,
+                PrivacyLevel::ApplicationMetadata,
+                serde_json::json!({}),
+                None,
+            ))
+            .unwrap();
+
+        let deleted = store.delete_expired_events(now).unwrap();
+        assert_eq!(deleted, 1);
+
+        let remaining_ids: Vec<i64> = store
+            .list_recent_events(10)
+            .unwrap()
+            .into_iter()
+            .filter_map(|e| e.id)
+            .collect();
+        assert!(!remaining_ids.contains(&expired_id));
+        assert!(remaining_ids.contains(&not_yet_expired_id));
+        assert!(remaining_ids.contains(&no_ttl_id));
     }
 
     #[test]
