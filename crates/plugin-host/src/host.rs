@@ -1,8 +1,32 @@
 use std::sync::{Arc, Mutex};
 
-use wasmtime::{Engine, Instance, Linker, Module, Store};
+use wasmtime::{Config, Engine, Instance, Linker, Module, Store, StoreLimits, StoreLimitsBuilder};
 
 use crate::manifest::Capability;
+
+/// Default CPU budget for a plugin instance's entire lifetime (every exported
+/// call combined), in wasmtime fuel units. Mitigates exactly the threat
+/// `docs/research/06-threat-model.md`'s Denial-of-Service section names: a
+/// module needing **zero** granted capabilities (so capability enforcement
+/// alone doesn't stop it) can still contain an infinite loop; without fuel
+/// metering, calling it blocks the calling thread forever. 50 million fuel
+/// units is generous for legitimate short plugin logic (wasmtime charges
+/// roughly one unit per executed instruction) while bounding a runaway loop to
+/// a small fraction of a second rather than forever.
+const DEFAULT_FUEL_BUDGET: u64 = 50_000_000;
+
+/// Default cap on linear memory a single plugin instance may allocate — a
+/// second, independent resource-exhaustion axis capability enforcement alone
+/// doesn't address (a module needs no `filesystem`/`network` capability to
+/// call `memory.grow` in a loop).
+const DEFAULT_MAX_MEMORY_BYTES: usize = 64 * 1024 * 1024;
+
+/// The `Store<T>` data type: just the `ResourceLimiter` wasmtime consults on
+/// every `memory.grow`/`table.grow`. Plugin logic itself has no access to this
+/// — it only ever sees the `host`-module imports `instantiate` links in.
+struct StoreState {
+    limits: StoreLimits,
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum HostError {
@@ -56,6 +80,8 @@ impl CallLog {
 /// capability's import is genuinely absent, not present-but-unused.
 pub struct PluginHost {
     engine: Engine,
+    fuel_budget: u64,
+    max_memory_bytes: usize,
 }
 
 impl Default for PluginHost {
@@ -66,8 +92,21 @@ impl Default for PluginHost {
 
 impl PluginHost {
     pub fn new() -> Self {
+        Self::with_limits(DEFAULT_FUEL_BUDGET, DEFAULT_MAX_MEMORY_BYTES)
+    }
+
+    /// Same as [`Self::new`] but with an explicit fuel/memory budget — mainly
+    /// so tests can use a tiny fuel budget and observe a runaway module trap
+    /// in milliseconds, instead of waiting out the production-sized default.
+    pub fn with_limits(fuel_budget: u64, max_memory_bytes: usize) -> Self {
+        let mut config = Config::new();
+        config.consume_fuel(true);
+        let engine = Engine::new(&config)
+            .expect("failed to construct the wasmtime engine with fuel metering enabled");
         Self {
-            engine: Engine::default(),
+            engine,
+            fuel_budget,
+            max_memory_bytes,
         }
     }
 
@@ -79,7 +118,7 @@ impl PluginHost {
         let module =
             Module::new(&self.engine, wasm_bytes).map_err(|e| HostError::Compile(e.to_string()))?;
 
-        let mut linker: Linker<()> = Linker::new(&self.engine);
+        let mut linker: Linker<StoreState> = Linker::new(&self.engine);
         let call_log = CallLog::default();
 
         if granted_capabilities.contains(&Capability::NetworkOutbound) {
@@ -133,7 +172,16 @@ impl PluginHost {
                 .map_err(|e| HostError::Instantiate(e.to_string()))?;
         }
 
-        let mut store = Store::new(&self.engine, ());
+        let limits = StoreLimitsBuilder::new()
+            .memory_size(self.max_memory_bytes)
+            .instances(1)
+            .build();
+        let mut store = Store::new(&self.engine, StoreState { limits });
+        store.limiter(|state| &mut state.limits);
+        store
+            .set_fuel(self.fuel_budget)
+            .expect("fuel consumption was enabled on this engine's Config");
+
         let instance = linker
             .instantiate(&mut store, &module)
             .map_err(|e| HostError::Instantiate(e.to_string()))?;
@@ -147,7 +195,7 @@ impl PluginHost {
 }
 
 pub struct PluginInstance {
-    store: Store<()>,
+    store: Store<StoreState>,
     instance: Instance,
     call_log: CallLog,
 }
