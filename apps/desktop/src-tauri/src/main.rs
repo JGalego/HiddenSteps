@@ -12,6 +12,7 @@ use hiddensteps_enterprise_policy::EnterprisePolicy;
 use hiddensteps_event_store::SqlCipherEventStore;
 use hiddensteps_privacy_engine::DispatchGate;
 use hiddensteps_security::{generate_master_key, KeyringSecretStore, SecretStore};
+use tauri::Manager;
 use tokio::sync::Mutex;
 
 const VAULT_SERVICE: &str = "com.hiddensteps.app";
@@ -111,8 +112,26 @@ fn main() {
         .manage(app_state)
         .setup(move |app| {
             let handle = app.handle().clone();
+            let recommendation_store = store.clone();
             tauri::async_runtime::spawn(async move {
-                recommendation_loop::run(handle, store).await;
+                recommendation_loop::run(handle, recommendation_store).await;
+            });
+
+            // The observation loop is started unconditionally here rather than
+            // only from `complete_onboarding` — it re-reads persisted
+            // `privacy_state` (observation_active/current_level) on every tick
+            // and simply idles when observation hasn't been turned on yet, so
+            // this is safe before onboarding completes and is what makes
+            // observation actually resume on every subsequent launch, not just
+            // the first one.
+            let observation_handle = app.handle().clone();
+            let observation_state_handle = app.handle().clone();
+            let observation_task = tokio::spawn(async move {
+                observation_loop::run(observation_handle, store).await;
+            });
+            tauri::async_runtime::spawn(async move {
+                let state = observation_state_handle.state::<state::AppState>();
+                *state.observation_task.lock().await = Some(observation_task);
             });
             Ok(())
         })

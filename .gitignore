@@ -7,6 +7,9 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# Tauri build-time generated schemas
+apps/desktop/src-tauri/gen/
+
 # Editor/OS cruft
 .DS_Store
 *.swp

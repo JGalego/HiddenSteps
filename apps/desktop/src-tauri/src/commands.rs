@@ -270,12 +270,10 @@ pub async fn complete_onboarding(
         ))
         .map_err(to_err)?;
 
-    let store = state.store.clone();
-    let app_for_task = app.clone();
-    let handle =
-        tokio::spawn(async move { crate::observation_loop::run(app_for_task, store).await });
-    *state.observation_task.lock().await = Some(handle);
-
+    // The observation loop itself is started once, unconditionally, at app
+    // startup (see `main.rs`'s `setup`) — it idles until `observation_active`
+    // flips true, which the write above just did. Spawning another instance
+    // here would run two loops against the same sources concurrently.
     let _ = app.emit(
         "observation::status_changed",
         serde_json::json!({ "active": true, "privacy_level": current.current_level.as_u8() }),
