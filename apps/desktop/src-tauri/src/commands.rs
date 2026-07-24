@@ -176,7 +176,7 @@ pub async fn set_ai_provider(
     request: SetAiProviderRequest,
 ) -> Result<bool, String> {
     let vault_key_ref = if let Some(api_key) = &request.api_key {
-        let secret_store = hiddensteps_security::KeyringSecretStore::new("com.hiddensteps.app");
+        let secret_store = hiddensteps_security::KeyringSecretStore::new(crate::VAULT_SERVICE);
         let entry_name = format!("provider-key-{}", request.id);
         secret_store
             .set(&entry_name, api_key.as_bytes())
@@ -367,12 +367,23 @@ pub async fn export_data(state: State<'_, AppState>) -> Result<serde_json::Value
 
 #[tauri::command]
 pub async fn delete_all_data(state: State<'_, AppState>) -> Result<bool, String> {
-    // Per docs/design/03-data-flow-diagrams.md §4: clear the store AND remove
-    // the vault key entry, so a surviving copy of the encrypted file is
-    // unreadable — this command does both, not just the store half.
+    // Per docs/design/03-data-flow-diagrams.md §4: clear the store AND
+    // invalidate the encryption key a surviving copy of the file was
+    // encrypted under, so that copy is unreadable. This rekeys the live
+    // database in place to a brand new key and persists *that* new key to
+    // the vault — rather than deleting the vault entry outright — because
+    // the on-disk file itself isn't deleted here (the running connection
+    // still has it open), so a launch that generated yet another,
+    // unrelated random key would never be able to open it again. Rekeying
+    // keeps the vault and the file in sync while still making any earlier
+    // copy of the file permanently unreadable.
     state.store.delete_all_data().map_err(to_err)?;
-    let secret_store = hiddensteps_security::KeyringSecretStore::new("com.hiddensteps.app");
-    secret_store.delete("db-master-key").map_err(to_err)?;
+    let new_key = hiddensteps_security::generate_master_key();
+    state.store.rekey(&new_key).map_err(to_err)?;
+    let secret_store = hiddensteps_security::KeyringSecretStore::new(crate::VAULT_SERVICE);
+    secret_store
+        .set(crate::MASTER_KEY_ENTRY, &new_key)
+        .map_err(to_err)?;
     Ok(true)
 }
 

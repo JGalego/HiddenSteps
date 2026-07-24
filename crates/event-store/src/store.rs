@@ -243,6 +243,23 @@ impl SqlCipherEventStore {
         Ok(())
     }
 
+    /// Re-encrypts the open database file in place under a brand new key
+    /// (SQLCipher's `PRAGMA rekey`) and verifies the new key actually opens
+    /// it. Callers implementing "delete all data" should call this — with a
+    /// freshly generated key that then replaces the old one in the vault —
+    /// rather than deleting the vault entry alone: deleting only the vault
+    /// entry leaves the on-disk file still encrypted under the now-forgotten
+    /// old key, so the very next launch generates yet another new key and
+    /// fails to open that file at all. Rekeying an already-`delete_all_data`d
+    /// (empty) store also means old key material can no longer decrypt even
+    /// the freed/vacuumed pages of a surviving on-disk or backup copy.
+    pub fn rekey(&self, new_key: &[u8; 32]) -> Result<(), EventStoreError> {
+        let conn = self.conn.lock().expect("event store mutex poisoned");
+        conn.execute_batch(&format!("PRAGMA rekey = \"x'{}'\";", to_hex(new_key)))?;
+        verify_key(&conn)?;
+        Ok(())
+    }
+
     /// Serializes every table's contents to JSON, for the Export Data trust
     /// feature. Decryption already happened implicitly on read — this is plain
     /// serialization of already-decrypted rows, per
@@ -1012,6 +1029,63 @@ mod tests {
         assert_eq!(state.current_level, PrivacyLevel::WorkflowMetadata);
         assert_eq!(state.consented_manifest_version, 3);
         assert!(state.observation_active);
+    }
+
+    #[test]
+    fn rekey_makes_the_old_key_unable_to_reopen_the_file_and_the_new_key_able_to() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profile.db");
+        let old_key = [0x33; 32];
+        let new_key = [0x44; 32];
+
+        {
+            let store = SqlCipherEventStore::open(&path, &old_key).unwrap();
+            store
+                .set_privacy_state(&PrivacyState {
+                    current_level: PrivacyLevel::WorkflowMetadata,
+                    consented_manifest_version: 1,
+                    observation_active: true,
+                    updated_at: OffsetDateTime::now_utc(),
+                })
+                .unwrap();
+            store.rekey(&new_key).unwrap();
+        }
+
+        assert!(matches!(
+            SqlCipherEventStore::open(&path, &old_key),
+            Err(EventStoreError::InvalidKeyOrCorruptFile)
+        ));
+
+        let reopened = SqlCipherEventStore::open(&path, &new_key).unwrap();
+        let state = reopened.get_privacy_state().unwrap();
+        assert_eq!(state.current_level, PrivacyLevel::WorkflowMetadata);
+    }
+
+    #[test]
+    fn rekey_after_delete_all_data_leaves_an_openable_empty_store() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profile.db");
+        let old_key = [0x55; 32];
+        let new_key = [0x66; 32];
+
+        {
+            let store = SqlCipherEventStore::open(&path, &old_key).unwrap();
+            store
+                .set_privacy_state(&PrivacyState {
+                    current_level: PrivacyLevel::WorkflowMetadata,
+                    consented_manifest_version: 1,
+                    observation_active: true,
+                    updated_at: OffsetDateTime::now_utc(),
+                })
+                .unwrap();
+            store.delete_all_data().unwrap();
+            store.rekey(&new_key).unwrap();
+        }
+
+        let reopened = SqlCipherEventStore::open(&path, &new_key).unwrap();
+        let state = reopened.get_privacy_state().unwrap();
+        assert_eq!(state.current_level, PrivacyLevel::Manual);
+        assert!(!state.observation_active);
     }
 
     #[test]
