@@ -2,6 +2,8 @@
 
 Phase 2 deliverable set, per `PROMPT.md`. Builds directly on the Phase 1 research (`../research/`) — every non-obvious decision below traces back to a specific finding, risk, or principle established there.
 
+> **These are design documents — the target system, not necessarily the shipped one.** They describe what HiddenSteps is designed to be; several parts are ahead of what's implemented today (the embedding store's mechanism, the full plugin-management lifecycle, exclusion rules, complexity tiers, browser-domain observation). For the honest, current *implementation* state, [`../../crates/README.md`](../../crates/README.md) and [`../../apps/desktop/README.md`](../../apps/desktop/README.md) are the ground truth; individual docs below carry an "Implementation note" where they differ materially from what's built.
+
 ## Reading order
 
 1. [01-prd.md](01-prd.md) — Product Requirements Document: goals, non-goals, personas, functional/non-functional requirements, success metrics, explicit exclusions.
@@ -29,6 +31,7 @@ Phase 2 deliverable set, per `PROMPT.md`. Builds directly on the Phase 1 researc
 | [0008](adr/0008-os-credential-vault-key-management.md) | OS credential vault as the sole root of key material |
 | [0009](adr/0009-wasm-plugin-sandbox.md) | WASM component-model sandbox with structural capability enforcement for all plugins |
 | [0010](adr/0010-hybrid-deterministic-plus-llm-recommendation-engine.md) | Recommendation engine: deterministic pattern detection (facts) + LLM synthesis (judgment), validated against drift |
+| [0011](adr/0011-enterprise-policy-two-knob-schema.md) | Enterprise policy as a fixed two-knob, restrict-only schema (privacy-level floor, provider allowlist) — can only tighten, never weaken a guarantee |
 
 ## What's deliberately not in Phase 2
 

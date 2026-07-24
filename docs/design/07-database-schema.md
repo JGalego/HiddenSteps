@@ -49,6 +49,12 @@ CREATE INDEX idx_event_summaries_ttl ON event_summaries(ttl_expires_at) WHERE tt
 
 -- Vector index over event/pattern summary embeddings (sqlite-vec virtual table).
 -- Embeds the SUMMARY, never raw content (ADR-0007).
+--
+-- IMPLEMENTATION NOTE (v0.1.x): the shipped hiddensteps-event-store does NOT
+-- load the sqlite-vec extension; it stores embeddings as plain BLOBs and
+-- computes cosine similarity in Rust. Same semantics at a single user's
+-- volume (see ADR-0007's amended note). The DDL below is the target form;
+-- crates/README.md is ground truth for what's built.
 CREATE VIRTUAL TABLE summary_embeddings USING vec0(
     summary_id          INTEGER PRIMARY KEY,   -- FK-by-convention to event_summaries.id or patterns.id
     embedding            FLOAT[384]             -- dimension depends on configured embedding model

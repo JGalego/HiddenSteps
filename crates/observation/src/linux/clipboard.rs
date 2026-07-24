@@ -106,6 +106,22 @@ fn atom_name(conn: &RustConnection, atom: u32) -> Result<String, PollError> {
     Ok(String::from_utf8_lossy(&reply.name).into_owned())
 }
 
+impl Drop for ClipboardMetadataSource {
+    /// Destroys the hidden requestor window this source created in `connect`,
+    /// so a source constructed and dropped repeatedly (e.g. observation
+    /// toggled off and on) doesn't leak one X11 window per instance for the
+    /// lifetime of the connection. Best-effort: if the destroy or flush fails
+    /// there is nothing useful to do from `drop`, and the window is reclaimed
+    /// when the connection itself closes regardless. (`GlobalShortcutSource`
+    /// already cleans up its grab this way; this brings the clipboard source
+    /// in line.)
+    fn drop(&mut self) {
+        if let Ok(cookie) = self.conn.destroy_window(self.requestor) {
+            let _ = cookie.check();
+        }
+    }
+}
+
 impl ObservationSource for ClipboardMetadataSource {
     fn id(&self) -> &str {
         "linux.clipboard_metadata"

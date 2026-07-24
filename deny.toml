@@ -17,7 +17,13 @@ ignore = []
 # "deny" because a brand-new transitive duplicate shouldn't hard-fail an
 # unrelated PR; it stays visible on every run.
 multiple-versions = "warn"
-wildcard-dependencies = "deny"
+# Deny wildcard (`*`) version requirements on registry crates — sloppy and a
+# supply-chain footgun. But the workspace's own crates depend on each other
+# via versionless `{ path = ... }`, which cargo-deny counts as wildcards;
+# allow-wildcard-paths exempts exactly those internal path deps, not registry
+# ones (a grep confirms no registry dep uses `*`).
+wildcards = "deny"
+allow-wildcard-paths = true
 
 [licenses]
 # Not enforced in the `check advisories bans` CI invocation, but recorded here

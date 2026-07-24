@@ -1,5 +1,17 @@
 # API Specification
 
+> **Implementation note (v0.1.x).** This spec is the *target* IPC surface.
+> The shipped Tauri shell wires a subset — roughly the onboarding, observation/
+> privacy-dashboard, recommendation, settings, and diagnostics commands. The
+> plugin-management commands (`install_plugin`, `grant_plugin_capabilities`,
+> `revoke_plugin_capability`, `uninstall_plugin`, `list_plugins`), the
+> exclusion-rule command (`set_exclusion_rule`), and `get_network_activity_log`
+> are **specified here but not implemented** — the underlying features aren't
+> built (see [`../../apps/desktop/ui/README.md`](../../apps/desktop/ui/README.md)'s
+> disclosed-gap list and [`../../crates/README.md`](../../crates/README.md)).
+> Treat any command not present in `apps/desktop/src-tauri`'s `invoke_handler!`
+> as aspirational.
+
 HiddenSteps has no public network API by default (local-first, per [../research/05-privacy-analysis.md](../research/05-privacy-analysis.md)) — "API" here means the two internal contracts that make the architecture extensible and inspectable: the **UI ↔ Core IPC** (Tauri commands/events) and the **Plugin Host interface** (already specified in WIT in [08-plugin-architecture.md](08-plugin-architecture.md) §4). This doc covers the former in full and cross-references the latter.
 
 ## 1. Design rules
