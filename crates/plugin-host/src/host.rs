@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use wasmtime::{Config, Engine, Instance, Linker, Module, Store, StoreLimits, StoreLimitsBuilder};
 
-use crate::manifest::Capability;
+use crate::manifest::{Capability, ManifestError, PluginManifest};
 
 /// Default CPU budget for a plugin instance's entire lifetime (every exported
 /// call combined), in wasmtime fuel units. Mitigates exactly the threat
@@ -38,6 +38,10 @@ pub enum HostError {
     Call(String),
     #[error("export '{0}' not found or has the wrong signature")]
     ExportMismatch(String),
+    #[error("manifest failed validation: {0}")]
+    ManifestInvalid(#[from] ManifestError),
+    #[error("capability {0:?} was granted but never declared in the plugin's manifest")]
+    GrantedCapabilityNotDeclared(Capability),
 }
 
 /// Records which gated host functions a plugin instance actually invoked, for
@@ -108,6 +112,30 @@ impl PluginHost {
             fuel_budget,
             max_memory_bytes,
         }
+    }
+
+    /// The safe entry point real call sites should use: forces
+    /// `PluginManifest::validate()` (the Level-4-required-for-`ObserveScreenshot`
+    /// rule, among anything else validation grows to cover) to run before any
+    /// capability reaches the linker, and additionally rejects granting a
+    /// capability the manifest never declared in the first place. Plain
+    /// [`Self::instantiate`] has neither check — it takes a bare capability
+    /// slice with no structural link to a manifest at all, so a caller could
+    /// previously construct/pass an unvalidated or inconsistent capability set
+    /// directly, silently bypassing rules like the Level-4 gate.
+    pub fn instantiate_from_manifest(
+        &self,
+        wasm_bytes: &[u8],
+        manifest: &PluginManifest,
+        granted_capabilities: &[Capability],
+    ) -> Result<PluginInstance, HostError> {
+        manifest.validate()?;
+        for capability in granted_capabilities {
+            if !manifest.capabilities.contains(capability) {
+                return Err(HostError::GrantedCapabilityNotDeclared(*capability));
+            }
+        }
+        self.instantiate(wasm_bytes, granted_capabilities)
     }
 
     pub fn instantiate(
