@@ -88,7 +88,29 @@ impl<'a, P: LlmProvider + ?Sized> Synthesizer<'a, P> {
         let fields: SynthesizedFields = serde_json::from_str(json)
             .map_err(|e| format!("JSON did not match expected shape: {e}"))?;
 
-        if contradicts_occurrence_count(&fields.why, detected.occurrence_count) {
+        // Checked across every free-text field the LLM controls, not just
+        // `why` — a contradiction ("since this only happened twice...") is
+        // exactly as trust-damaging sitting in `assumptions` or
+        // `privacy_implications` as it is in `why`, and there's no reason to
+        // assume the model only ever restates the count in one specific
+        // field.
+        let contradiction_check_fields: Vec<&str> = std::iter::once(fields.why.as_str())
+            .chain(std::iter::once(fields.title.as_str()))
+            .chain(std::iter::once(fields.privacy_implications.as_str()))
+            .chain(std::iter::once(fields.implementation_effort.as_str()))
+            .chain(fields.assumptions.iter().map(String::as_str))
+            .chain(fields.ignored_information.iter().map(String::as_str))
+            .chain(
+                fields
+                    .alternatives
+                    .iter()
+                    .flat_map(|a| [a.approach.as_str(), a.tradeoff.as_str()]),
+            )
+            .collect();
+        if contradiction_check_fields
+            .iter()
+            .any(|text| contradicts_occurrence_count(text, detected.occurrence_count))
+        {
             return Err(format!(
                 "response narrative contradicts the real occurrence count ({})",
                 detected.occurrence_count
@@ -276,6 +298,31 @@ mod tests {
             .await
             .unwrap();
         assert!(!contradicts_occurrence_count(&recommendation.why, 31));
+    }
+
+    #[tokio::test]
+    async fn retries_on_a_narrative_contradiction_sitting_in_assumptions_not_why() {
+        // Regression test: the contradiction check used to only look at
+        // `why` — the exact same contradictory claim sitting in any other
+        // LLM-controlled free-text field (assumptions, privacy_implications,
+        // ...) was accepted without complaint.
+        let contradicting = VALID_RESPONSE.replace(
+            "[\"API access to the source system is available.\"]",
+            "[\"Since this only happened twice, automation may not be worth it.\"]",
+        );
+        let provider = ScriptedProvider::new(vec![&contradicting, VALID_RESPONSE]);
+        let synthesizer = Synthesizer::new(&provider);
+        let recommendation = synthesizer
+            .synthesize(7, &sample_detected_pattern())
+            .await
+            .unwrap();
+        // The retry succeeded on the second (valid) attempt — the assumptions
+        // field on the accepted recommendation came from VALID_RESPONSE, not
+        // the contradicting one.
+        assert_eq!(
+            recommendation.assumptions,
+            vec!["API access to the source system is available.".to_string()]
+        );
     }
 
     #[tokio::test]
