@@ -57,3 +57,43 @@ Sequenced so that every milestone ships something genuinely usable and testable 
 - AI capability (M2) deliberately comes *after* a working, trustworthy, AI-free observation loop (M1) — this directly tests the ADR-0010 bet that the product has real value even with a weak/absent model, and lets trust-UX get validated without the confound of "was the user reacting to the AI or to the observation."
 - Security/privacy hardening (M3) is scheduled before the plugin framework (M4) — third-party extensibility should land on top of an already-hardened core, not be the first place hardening gets tested.
 - Enterprise/portability/accessibility (M5) is scheduled last among build-out milestones because it's breadth work across an already-functioning core, not a dependency for anything earlier — but it is not "M5 = deprioritized"; per PROMPT.md these are first-class requirements and M6 (GA) is blocked on M5's exit criteria, not optional.
+
+## Beyond GA — the long-term vision (PROMPT.md's "not simply a desktop agent")
+
+PROMPT.md frames HiddenSteps' end state in terms M0–M6 above don't reach: a
+**workflow graph** maturing into a **knowledge graph**, a **continuous workflow
+optimizer**, a **workflow memory**, and a **decision-support system** — the
+framing that distinguishes it from "a desktop agent." This section records how
+today's building blocks relate to that vision so it's an explicit decision, not
+an accidental silence. None of the below is scheduled work; it's the direction
+the shipped architecture is meant to be able to grow toward without a rewrite.
+
+- **Workflow graph → knowledge graph.** The transition graph built in
+  `hiddensteps-patterns` (nodes = action keys, edges = observed transitions
+  with weights) is the seed. A knowledge graph adds typed nodes (tools,
+  documents, people-as-roles-never-identities) and typed edges (produces,
+  consumes, blocks) on top of the same store. The privacy constraint is the
+  hard part, not the graph: any richer node type must pass the same
+  redaction/summarize discipline (ADR-0006) and cloud-eligibility gate
+  (ADR-0004) as everything else — a knowledge graph of *summaries and shapes*,
+  never of verbatim content. This is why it isn't a near-term milestone: it's a
+  privacy-model extension first and a data-structure second.
+- **Continuous optimizer / workflow memory.** Today each recommendation is a
+  one-shot suggestion. The "continuous optimizer" is the same engine run as a
+  standing loop that also remembers what the user acted on, what changed after,
+  and adjusts — i.e., recommendations become stateful and longitudinal. The
+  `recommendations` table + audit log already capture the raw material
+  (accepted/dismissed, when); turning that into feedback the engine learns from
+  is the step, and it must stay explainable (ADR-0010's "numbers trace to real
+  events" rule) rather than becoming an opaque model.
+- **Decision-support system.** The honest framing of the above: the product
+  never decides or acts (that's the NG line in [../design/01-prd.md](../design/01-prd.md));
+  "decision support" means presenting the graph + longitudinal trends so the
+  *user* decides better. Any feature here is additive to, never a replacement
+  for, the "observe and explain, never act" boundary.
+
+Each of these would need its own ADR(s), a threat-model addendum, and — for
+anything that widens what's observed or retained — a privacy-model revision and
+a fresh ethical review before being scheduled, exactly as
+[../design/README.md](../design/README.md)'s "not in Phase 2" note requires for
+cross-device sync and aggregate views.

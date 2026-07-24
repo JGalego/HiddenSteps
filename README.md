@@ -87,7 +87,7 @@ cargo test -p hiddensteps-llm-provider -- --ignored
 ### 2. The desktop app
 
 ```sh
-cd apps/desktop/ui && npm install && npm test   # 46 tests, real jsdom rendering
+cd apps/desktop/ui && npm install && npm test   # 50 tests, real jsdom rendering
 ```
 
 The native shell needs [Tauri's platform prerequisites](https://tauri.app/start/prerequisites/) (on Linux: `webkit2gtk-4.1` and friends via your package manager) — verified building on all three OSes in [CI](.github/workflows/ci.yml):
@@ -116,6 +116,8 @@ apps/desktop/ The Tauri shell + React/TypeScript UI — see apps/desktop/README.
 ## Contributing
 
 Genuinely welcome, especially: actually running a release build day-to-day and reporting back what breaks; a real design pass on the app icon; signing/notarization setup (there is none yet — see the release notes); and filling in any of the disclosed gaps listed throughout `crates/README.md` and `apps/desktop/*/README.md`.
+
+See **[CONTRIBUTING.md](CONTRIBUTING.md)** for setup, the checks to run before opening a PR, and the ground rules; report security issues privately per **[SECURITY.md](SECURITY.md)**.
 
 ## License
 

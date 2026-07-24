@@ -1,4 +1,5 @@
-use rand::RngCore;
+use rand::rand_core::UnwrapErr;
+use rand::Rng;
 use zeroize::Zeroizing;
 
 /// A 256-bit key, generated via the OS CSPRNG.
@@ -14,7 +15,7 @@ use zeroize::Zeroizing;
 /// pass `&*key` where a `&[u8; 32]`/`&[u8]` is wanted.
 pub fn generate_master_key() -> Zeroizing<[u8; 32]> {
     let mut key = Zeroizing::new([0u8; 32]);
-    rand::rngs::OsRng.fill_bytes(&mut *key);
+    UnwrapErr(rand::rngs::SysRng).fill_bytes(&mut *key);
     key
 }
 
