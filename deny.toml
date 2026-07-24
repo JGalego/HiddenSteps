@@ -1,0 +1,40 @@
+# cargo-deny configuration — see https://embarkstudios.github.io/cargo-deny/
+# Run locally with `cargo install cargo-deny && cargo deny check`.
+# CI runs `cargo deny check advisories bans` (see .github/workflows/ci.yml).
+
+[advisories]
+# Fail on any security advisory affecting a dependency in the tree. `yanked`
+# crates are also flagged — a yanked version is usually yanked for a reason.
+version = 2
+yanked = "deny"
+# Advisories we've reviewed and consciously accept go here, each with a
+# comment explaining why. Empty by design — an empty ignore list is the goal.
+ignore = []
+
+[bans]
+# Catch a dependency being pulled in at several incompatible versions, which
+# both bloats the binary and multiplies the CVE surface. "warn" rather than
+# "deny" because a brand-new transitive duplicate shouldn't hard-fail an
+# unrelated PR; it stays visible on every run.
+multiple-versions = "warn"
+wildcard-dependencies = "deny"
+
+[licenses]
+# Not enforced in the `check advisories bans` CI invocation, but recorded here
+# so `cargo deny check licenses` is meaningful locally. Permissive licenses
+# compatible with this project's own MIT license.
+version = 2
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Zlib",
+    "MPL-2.0",
+    "CC0-1.0",
+]
+confidence-threshold = 0.9

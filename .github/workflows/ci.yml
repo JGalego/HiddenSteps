@@ -14,6 +14,15 @@ on:
     branches: [main]
   pull_request:
 
+# Least privilege: nothing in this workflow needs to write to the repo. The
+# default GITHUB_TOKEN scope is often broader than read-only, so pin it down
+# explicitly here (release.yml sets its own contents:write where it's needed).
+permissions:
+  contents: read
+
+# Third-party actions are pinned by commit SHA, not by floating tag, so a
+# compromised upstream tag can't silently repoint to malicious code. The
+# trailing comment records the human-readable version each SHA corresponds to.
 jobs:
   core:
     name: Rust core (${{ matrix.os }})
@@ -23,11 +32,11 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable @ 2024
         with:
           components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
 
       - name: Format check
         run: cargo fmt --check
@@ -80,8 +89,8 @@ jobs:
       run:
         working-directory: apps/desktop/ui
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "18"
           cache: "npm"
@@ -100,9 +109,9 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable @ 2024
+      - uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
         with:
           workspaces: apps/desktop/src-tauri
 
@@ -131,3 +140,33 @@ jobs:
       - name: cargo build the Tauri shell
         working-directory: apps/desktop/src-tauri
         run: cargo build
+
+  # Dependency vulnerability scanning — previously absent entirely, so a
+  # known-CVE dependency in the LLM-client / crypto / SQLite surface could sit
+  # undetected. cargo-deny covers the Rust workspace (advisories + license +
+  # duplicate/ban policy from deny.toml); npm audit covers the UI. Runs
+  # alongside the build jobs, not gating them, so a freshly-published advisory
+  # doesn't block an unrelated PR while still being visible on every run.
+  audit-rust:
+    name: cargo-deny (advisories)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: EmbarkStudios/cargo-deny-action@c3bbe7e4e3f7baeee1a3dd9aec0a3b2aded580fb # v2.1.1
+        with:
+          command: check advisories bans
+
+  audit-ui:
+    name: npm audit (UI)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/desktop/ui
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "18"
+      # High/critical advisories fail the job; the dev-only toolchain
+      # (vite/vitest) surface means moderate/low are surfaced but not gating.
+      - run: npm audit --audit-level=high

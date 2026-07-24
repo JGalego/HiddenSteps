@@ -1,0 +1,41 @@
+version: 2
+updates:
+  # Rust workspace (root Cargo.toml + all member crates).
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      # Batch routine dependency bumps into one PR per week rather than a
+      # flood of individual ones; security updates still come through
+      # immediately and separately.
+      cargo-minor-and-patch:
+        update-types: ["minor", "patch"]
+
+  # The Tauri shell has its own Cargo.lock outside the workspace.
+  - package-ecosystem: cargo
+    directory: "/apps/desktop/src-tauri"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      tauri-shell-minor-and-patch:
+        update-types: ["minor", "patch"]
+
+  # UI npm dependencies.
+  - package-ecosystem: npm
+    directory: "/apps/desktop/ui"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      ui-minor-and-patch:
+        update-types: ["minor", "patch"]
+
+  # The GitHub Actions themselves — keeps the SHA pins in the workflows
+  # current, with Dependabot updating both the SHA and the version comment.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
