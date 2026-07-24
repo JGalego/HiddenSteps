@@ -38,6 +38,20 @@ struct GenerateRequest<'a> {
     stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     think: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    options: Option<GenerateOptions>,
+}
+
+/// Ollama's `/api/generate` takes generation limits under a nested `options`
+/// object, not as top-level request fields — unlike `openai.rs`/`anthropic.rs`,
+/// which both forward `CompletionRequest::max_tokens` at the top level.
+/// Without this, `max_tokens` was silently dropped for Ollama specifically:
+/// the field existed on the shared request type but had nowhere to go in the
+/// request this client actually sent.
+#[derive(Serialize)]
+struct GenerateOptions {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    num_predict: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -76,6 +90,9 @@ impl LlmProvider for OllamaProvider {
             system: request.system.as_deref(),
             stream: false,
             think: request.think,
+            options: request.max_tokens.map(|num_predict| GenerateOptions {
+                num_predict: Some(num_predict),
+            }),
         };
         let response = self
             .client
@@ -167,6 +184,43 @@ mod tests {
             result.text,
             "This looks like a repeated manual data-entry step."
         );
+    }
+
+    #[tokio::test]
+    async fn max_tokens_is_forwarded_as_a_nested_num_predict_option() {
+        // Regression test: max_tokens used to have nowhere to go in the
+        // actual request body sent to Ollama, since GenerateRequest had no
+        // num_predict field at all — it was silently dropped, unlike
+        // openai.rs/anthropic.rs which both forward it correctly.
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/generate"))
+            .and(body_json(serde_json::json!({
+                "model": "llama3.1:8b",
+                "prompt": "summarize",
+                "stream": false,
+                "options": { "num_predict": 256 }
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "model": "llama3.1:8b",
+                "response": "ok",
+                "done": true
+            })))
+            .mount(&server)
+            .await;
+
+        let provider = OllamaProvider::new(server.uri(), "llama3.1:8b");
+        let result = provider
+            .complete(CompletionRequest {
+                system: None,
+                prompt: "summarize".to_string(),
+                max_tokens: Some(256),
+                think: None,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(result.text, "ok");
     }
 
     #[tokio::test]
