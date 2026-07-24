@@ -21,6 +21,23 @@ fn to_err(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
 
+/// Appends an audit-log entry without letting a write failure there turn an
+/// already-succeeded primary action into a command error. Every call site
+/// below does the real mutation first and logs it second — before this, a
+/// failed audit-log write (a full disk, a poisoned mutex — rare, but
+/// possible) made `delete_events`/`set_privacy_level`/etc. return `Err` even
+/// though the deletion/level-change/etc. had already gone through, which
+/// could prompt a user to retry an action that had, in fact, already taken
+/// effect.
+pub(crate) fn log_audit(store: &hiddensteps_event_store::SqlCipherEventStore, entry: AuditEntry) {
+    if let Err(e) = store.append_audit_entry(&entry) {
+        eprintln!(
+            "audit log write failed for action '{}': {e}",
+            entry.action_type
+        );
+    }
+}
+
 /// The settings-table key general cloud-dispatch consent is persisted under —
 /// there's no dedicated schema column for it (see `state::AppState`'s doc
 /// comment on why the in-memory `DispatchGate` is rebuilt from this at every
@@ -215,14 +232,14 @@ pub async fn set_ai_provider(
         .set_active_llm_provider(&request.id)
         .map_err(to_err)?;
 
-    state
-        .store
-        .append_audit_entry(&AuditEntry::new(
+    log_audit(
+        &state.store,
+        AuditEntry::new(
             AuditActor::User,
             "provider_changed",
             serde_json::json!({ "provider_id": request.id }),
-        ))
-        .map_err(to_err)?;
+        ),
+    );
     Ok(true)
 }
 
@@ -259,9 +276,9 @@ pub async fn set_privacy_level(
     current.updated_at = OffsetDateTime::now_utc();
     state.store.set_privacy_state(&current).map_err(to_err)?;
 
-    state
-        .store
-        .append_audit_entry(&AuditEntry::new(
+    log_audit(
+        &state.store,
+        AuditEntry::new(
             AuditActor::User,
             "privacy_level_changed",
             serde_json::json!({
@@ -269,8 +286,8 @@ pub async fn set_privacy_level(
                 "requested": requested_level.as_u8(),
                 "to": effective_level.as_u8(),
             }),
-        ))
-        .map_err(to_err)?;
+        ),
+    );
 
     Ok(SetPrivacyLevelResponse {
         effective_level: effective_level.as_u8(),
@@ -287,14 +304,14 @@ pub async fn complete_onboarding(
     current.updated_at = OffsetDateTime::now_utc();
     state.store.set_privacy_state(&current).map_err(to_err)?;
 
-    state
-        .store
-        .append_audit_entry(&AuditEntry::new(
+    log_audit(
+        &state.store,
+        AuditEntry::new(
             AuditActor::User,
             "observation_started",
             serde_json::json!({}),
-        ))
-        .map_err(to_err)?;
+        ),
+    );
 
     // The observation loop itself is started once, unconditionally, at app
     // startup (see `main.rs`'s `setup`) — it idles until `observation_active`
@@ -352,14 +369,14 @@ pub async fn acknowledge_privacy_manifest(state: State<'_, AppState>) -> Result<
     current.consented_manifest_version = hiddensteps_privacy_engine::CURRENT_MANIFEST_VERSION;
     current.updated_at = OffsetDateTime::now_utc();
     state.store.set_privacy_state(&current).map_err(to_err)?;
-    state
-        .store
-        .append_audit_entry(&AuditEntry::new(
+    log_audit(
+        &state.store,
+        AuditEntry::new(
             AuditActor::User,
             "privacy_manifest_reconsented",
             serde_json::json!({ "version": hiddensteps_privacy_engine::CURRENT_MANIFEST_VERSION }),
-        ))
-        .map_err(to_err)?;
+        ),
+    );
     Ok(true)
 }
 
@@ -369,14 +386,14 @@ pub async fn pause_observation(app: AppHandle, state: State<'_, AppState>) -> Re
     current.observation_active = false;
     current.updated_at = OffsetDateTime::now_utc();
     state.store.set_privacy_state(&current).map_err(to_err)?;
-    state
-        .store
-        .append_audit_entry(&AuditEntry::new(
+    log_audit(
+        &state.store,
+        AuditEntry::new(
             AuditActor::User,
             "observation_paused",
             serde_json::json!({}),
-        ))
-        .map_err(to_err)?;
+        ),
+    );
     let _ = app.emit(
         "observation::status_changed",
         serde_json::json!({ "active": false, "privacy_level": current.current_level.as_u8() }),
@@ -390,14 +407,14 @@ pub async fn resume_observation(state: State<'_, AppState>) -> Result<bool, Stri
     current.observation_active = true;
     current.updated_at = OffsetDateTime::now_utc();
     state.store.set_privacy_state(&current).map_err(to_err)?;
-    state
-        .store
-        .append_audit_entry(&AuditEntry::new(
+    log_audit(
+        &state.store,
+        AuditEntry::new(
             AuditActor::User,
             "observation_resumed",
             serde_json::json!({}),
-        ))
-        .map_err(to_err)?;
+        ),
+    );
     Ok(true)
 }
 
@@ -415,28 +432,24 @@ pub async fn delete_events(
     event_ids: Vec<i64>,
 ) -> Result<usize, String> {
     let count = state.store.delete_events(&event_ids).map_err(to_err)?;
-    state
-        .store
-        .append_audit_entry(&AuditEntry::new(
+    log_audit(
+        &state.store,
+        AuditEntry::new(
             AuditActor::User,
             "events_deleted",
             serde_json::json!({ "count": count }),
-        ))
-        .map_err(to_err)?;
+        ),
+    );
     Ok(count)
 }
 
 #[tauri::command]
 pub async fn export_data(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
     let data = state.store.export_data().map_err(to_err)?;
-    state
-        .store
-        .append_audit_entry(&AuditEntry::new(
-            AuditActor::User,
-            "data_exported",
-            serde_json::json!({}),
-        ))
-        .map_err(to_err)?;
+    log_audit(
+        &state.store,
+        AuditEntry::new(AuditActor::User, "data_exported", serde_json::json!({})),
+    );
     Ok(data)
 }
 
@@ -567,14 +580,14 @@ pub async fn set_cloud_consent(state: State<'_, AppState>, granted: bool) -> Res
     }
     drop(gate);
 
-    state
-        .store
-        .append_audit_entry(&AuditEntry::new(
+    log_audit(
+        &state.store,
+        AuditEntry::new(
             AuditActor::User,
             "cloud_consent_changed",
             serde_json::json!({ "granted": granted }),
-        ))
-        .map_err(to_err)?;
+        ),
+    );
     Ok(granted)
 }
 

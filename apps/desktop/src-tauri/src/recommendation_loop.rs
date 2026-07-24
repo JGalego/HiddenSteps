@@ -34,11 +34,14 @@ const EVENT_HISTORY_LIMIT: i64 = 2000;
 pub async fn run(app: AppHandle, store: Arc<SqlCipherEventStore>) {
     loop {
         if let Err(e) = sweep_once(&app, &store).await {
-            let _ = store.append_audit_entry(&AuditEntry::new(
-                AuditActor::System,
-                "recommendation_sweep_error",
-                serde_json::json!({ "error": e }),
-            ));
+            crate::commands::log_audit(
+                &store,
+                AuditEntry::new(
+                    AuditActor::System,
+                    "recommendation_sweep_error",
+                    serde_json::json!({ "error": e }),
+                ),
+            );
         }
         tokio::time::sleep(SWEEP_INTERVAL).await;
     }
@@ -54,19 +57,25 @@ async fn sweep_once(app: &AppHandle, store: &SqlCipherEventStore) -> Result<(), 
     // background task.
     match store.delete_expired_events(OffsetDateTime::now_utc()) {
         Ok(count) if count > 0 => {
-            let _ = store.append_audit_entry(&AuditEntry::new(
-                AuditActor::System,
-                "deep_mode_ttl_expired_events_deleted",
-                serde_json::json!({ "count": count }),
-            ));
+            crate::commands::log_audit(
+                store,
+                AuditEntry::new(
+                    AuditActor::System,
+                    "deep_mode_ttl_expired_events_deleted",
+                    serde_json::json!({ "count": count }),
+                ),
+            );
         }
         Ok(_) => {}
         Err(e) => {
-            let _ = store.append_audit_entry(&AuditEntry::new(
-                AuditActor::System,
-                "deep_mode_ttl_sweep_error",
-                serde_json::json!({ "error": e.to_string() }),
-            ));
+            crate::commands::log_audit(
+                store,
+                AuditEntry::new(
+                    AuditActor::System,
+                    "deep_mode_ttl_sweep_error",
+                    serde_json::json!({ "error": e.to_string() }),
+                ),
+            );
         }
     }
 
@@ -171,11 +180,14 @@ async fn try_synthesize(
         detected.contains_verbatim_strings,
     );
     if !matches!(decision, DispatchDecision::Allow) {
-        let _ = store.append_audit_entry(&AuditEntry::new(
-            AuditActor::System,
-            "recommendation_blocked_by_privacy_gate",
-            serde_json::json!({ "pattern_id": pattern_id }),
-        ));
+        crate::commands::log_audit(
+            store,
+            AuditEntry::new(
+                AuditActor::System,
+                "recommendation_blocked_by_privacy_gate",
+                serde_json::json!({ "pattern_id": pattern_id }),
+            ),
+        );
         return;
     }
 
@@ -193,11 +205,14 @@ async fn try_synthesize(
             }
         }
         Err(e) => {
-            let _ = store.append_audit_entry(&AuditEntry::new(
-                AuditActor::System,
-                "recommendation_synthesis_failed",
-                serde_json::json!({ "pattern_id": pattern_id, "error": e.to_string() }),
-            ));
+            crate::commands::log_audit(
+                store,
+                AuditEntry::new(
+                    AuditActor::System,
+                    "recommendation_synthesis_failed",
+                    serde_json::json!({ "pattern_id": pattern_id, "error": e.to_string() }),
+                ),
+            );
         }
     }
 }
