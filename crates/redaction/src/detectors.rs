@@ -231,9 +231,15 @@ pub fn detect_all(text: &str) -> Vec<Detection> {
         }
         let has_letter = token.chars().any(|c| c.is_ascii_alphabetic());
         let has_digit_or_symbol = token.chars().any(|c| !c.is_ascii_alphabetic());
-        let mixed_case = token.chars().any(|c| c.is_ascii_uppercase())
-            && token.chars().any(|c| c.is_ascii_lowercase());
-        if has_letter && has_digit_or_symbol && mixed_case && shannon_entropy(token) >= 4.0 {
+        // Deliberately no mixed-case requirement: a real high-entropy secret
+        // that happens to be all-lowercase or all-uppercase (many real-world
+        // API/session tokens are lowercase hex or uppercase base32, e.g. TOTP
+        // seeds) is exactly as much of a secret as a mixed-case one, and case
+        // alone says nothing about randomness. `looks_like_common_hex_id`
+        // above already carves out the common non-secret hex-id lengths
+        // (git SHAs, MD5/SHA hashes) that would otherwise be the main source
+        // of false positives this used to lean on case-mixing to avoid.
+        if has_letter && has_digit_or_symbol && shannon_entropy(token) >= 4.0 {
             detections.push(Detection {
                 start: m.start(),
                 end: m.end(),
@@ -464,6 +470,31 @@ mod tests {
     #[test]
     fn flags_high_entropy_token_as_ambiguous_not_high_confidence() {
         let text = "config value: xK9mQ2vP7zR4wN8tL1bH5cD3";
+        let detections = detect_all(text);
+        assert!(detections
+            .iter()
+            .any(|d| d.category == Category::AmbiguousSecret
+                && d.confidence == Confidence::Ambiguous));
+    }
+
+    #[test]
+    fn flags_an_all_lowercase_high_entropy_token_as_ambiguous() {
+        // Regression test: the detector used to require both an uppercase
+        // and a lowercase letter, so a real high-entropy secret that
+        // happens to be all one case (many real API/session tokens are
+        // lowercase hex or uppercase base32) was never flagged at all,
+        // regardless of entropy.
+        let text = "config value: xk9mq2vp7zr4wn8tl1bh5cd3";
+        let detections = detect_all(text);
+        assert!(detections
+            .iter()
+            .any(|d| d.category == Category::AmbiguousSecret
+                && d.confidence == Confidence::Ambiguous));
+    }
+
+    #[test]
+    fn flags_an_all_uppercase_high_entropy_token_as_ambiguous() {
+        let text = "config value: XK9MQ2VP7ZR4WN8TL1BH5CD3";
         let detections = detect_all(text);
         assert!(detections
             .iter()
