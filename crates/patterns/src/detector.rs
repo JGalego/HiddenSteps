@@ -80,10 +80,6 @@ impl PatternDetector {
     }
 
     fn detect_for_window(&self, events: &[EventSummary], window: usize) -> Vec<DetectedPattern> {
-        struct Occurrence<'a> {
-            slice: &'a [EventSummary],
-        }
-
         let mut groups: HashMap<Vec<String>, Vec<Occurrence>> = HashMap::new();
         for start in 0..=(events.len() - window) {
             let slice = &events[start..start + window];
@@ -91,11 +87,12 @@ impl PatternDetector {
             groups
                 .entry(signature)
                 .or_default()
-                .push(Occurrence { slice });
+                .push(Occurrence { start, slice });
         }
 
         groups
             .into_iter()
+            .map(|(signature, occurrences)| (signature, select_non_overlapping(occurrences)))
             .filter(|(_, occurrences)| occurrences.len() as u32 >= self.min_occurrences)
             .map(|(signature, occurrences)| {
                 let first_seen_at = occurrences
@@ -136,6 +133,34 @@ impl PatternDetector {
             })
             .collect()
     }
+}
+
+struct Occurrence<'a> {
+    start: usize,
+    slice: &'a [EventSummary],
+}
+
+/// Greedily keeps only non-overlapping occurrences, earliest-start-first —
+/// otherwise a signature that repeats with a period shorter than the window
+/// size (e.g. six consecutive identical actions scanned at window size 2)
+/// gets one overlapping "occurrence" per start position rather than per real
+/// repetition, inflating `occurrence_count` and attributing the same event
+/// id to more than one occurrence. Since every occurrence in a group has the
+/// same fixed length (`window`), taking the earliest-starting occurrence and
+/// skipping every later one that starts before it ends is not just *a*
+/// correct choice but the one that admits the maximum possible count of
+/// non-overlapping occurrences from this group.
+fn select_non_overlapping(mut occurrences: Vec<Occurrence>) -> Vec<Occurrence> {
+    occurrences.sort_by_key(|o| o.start);
+    let mut selected: Vec<Occurrence> = Vec::new();
+    let mut next_allowed_start = 0usize;
+    for occurrence in occurrences {
+        if occurrence.start >= next_allowed_start {
+            next_allowed_start = occurrence.start + occurrence.slice.len();
+            selected.push(occurrence);
+        }
+    }
+    selected
 }
 
 /// The structural identity of an event for pattern-matching purposes: which
@@ -308,6 +333,35 @@ mod tests {
         ];
         let detector = PatternDetector::new(2..=2, 3);
         assert!(detector.detect(&events).is_empty());
+    }
+
+    #[test]
+    fn overlapping_windows_over_a_continuous_repeat_are_not_double_counted() {
+        // Regression test: six consecutive identical actions scanned at
+        // window size 2 used to yield occurrence_count == 5 (one overlapping
+        // "occurrence" per start position: [0,1],[1,2],[2,3],[3,4],[4,5]),
+        // with events 1-4 each attributed to two different occurrences. The
+        // real number of non-overlapping repetitions of this 2-step shape is
+        // 3 — the same numbers a recommendation's "you did this N times"
+        // narrative and estimated-time-saved figure are computed from.
+        let mut events = Vec::new();
+        let mut id = 1;
+        for minute in 0..6 {
+            events.push(event_at(minute, "jira", SignalType::AppActionEvent, id));
+            id += 1;
+        }
+        let detector = PatternDetector::new(2..=2, 3);
+        let detected = detector.detect(&events);
+
+        assert_eq!(detected.len(), 1);
+        let pattern = &detected[0];
+        assert_eq!(pattern.occurrence_count, 3);
+        assert_eq!(pattern.contributing_event_ids.len(), 6);
+        // No event id should be attributed to more than one occurrence.
+        let mut ids = pattern.contributing_event_ids.clone();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), 6);
     }
 
     #[test]
