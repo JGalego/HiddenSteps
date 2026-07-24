@@ -117,6 +117,68 @@ impl SqlCipherEventStore {
         Ok(())
     }
 
+    /// The one row (if any) written by an applied enterprise policy —
+    /// `docs/design/05-privacy-model.md` §6. `None` means no policy has ever
+    /// been applied on this device, distinct from `EnterprisePolicy::default()`
+    /// (parsed-but-empty), though the two behave identically to every caller
+    /// that reads them through `effective_privacy_level`/`is_provider_allowed`.
+    pub fn get_enterprise_policy(
+        &self,
+    ) -> Result<Option<hiddensteps_enterprise_policy::EnterprisePolicy>, EventStoreError> {
+        let conn = self.conn.lock().expect("event store mutex poisoned");
+        let row: Option<(Option<String>, Option<i64>, Option<String>)> = conn
+            .query_row(
+                "SELECT policy_source, privacy_level_floor, provider_allowlist_json
+                 FROM enterprise_policy WHERE id = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()?;
+
+        row.map(|(policy_source, privacy_level_floor, allowlist_json)| {
+            let provider_allowlist = allowlist_json
+                .map(|json| serde_json::from_str(&json))
+                .transpose()?;
+            Ok(hiddensteps_enterprise_policy::EnterprisePolicy {
+                policy_source,
+                privacy_level_floor: privacy_level_floor.map(|f| f as u8),
+                provider_allowlist,
+            })
+        })
+        .transpose()
+    }
+
+    /// Persists an applied enterprise policy — replacing whatever was there
+    /// before, since exactly one policy applies to a device at a time.
+    pub fn set_enterprise_policy(
+        &self,
+        policy: &hiddensteps_enterprise_policy::EnterprisePolicy,
+    ) -> Result<(), EventStoreError> {
+        let conn = self.conn.lock().expect("event store mutex poisoned");
+        let allowlist_json = policy
+            .provider_allowlist
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()?;
+        conn.execute(
+            "INSERT INTO enterprise_policy
+                 (id, policy_source, privacy_level_floor, provider_allowlist_json, applied_at)
+             VALUES (1, ?1, ?2, ?3, ?4)
+             ON CONFLICT(id) DO UPDATE SET
+                 policy_source = excluded.policy_source,
+                 privacy_level_floor = excluded.privacy_level_floor,
+                 provider_allowlist_json = excluded.provider_allowlist_json,
+                 applied_at = excluded.applied_at",
+            params![
+                policy.policy_source,
+                policy.privacy_level_floor.map(|f| f as i64),
+                allowlist_json,
+                to_rfc3339(OffsetDateTime::now_utc()),
+            ],
+        )?;
+        Ok(())
+    }
+
     // --- event summaries (FR-5, FR-9) ---
 
     /// Persists an already-classified, already-redacted, already-summarized event.
@@ -1521,6 +1583,39 @@ mod tests {
 
         let active = store.get_active_llm_provider().unwrap();
         assert_eq!(active.map(|p| p.id), Some("ollama-local".to_string()));
+    }
+
+    #[test]
+    fn no_enterprise_policy_by_default() {
+        let store = SqlCipherEventStore::open_in_memory(&test_key()).unwrap();
+        assert!(store.get_enterprise_policy().unwrap().is_none());
+    }
+
+    #[test]
+    fn enterprise_policy_round_trips_and_can_be_replaced() {
+        let store = SqlCipherEventStore::open_in_memory(&test_key()).unwrap();
+        let policy = hiddensteps_enterprise_policy::EnterprisePolicy {
+            policy_source: Some("corp-mdm".to_string()),
+            privacy_level_floor: Some(1),
+            provider_allowlist: Some(vec!["ollama".to_string()]),
+        };
+        store.set_enterprise_policy(&policy).unwrap();
+
+        let loaded = store.get_enterprise_policy().unwrap().unwrap();
+        assert_eq!(loaded.policy_source, Some("corp-mdm".to_string()));
+        assert_eq!(loaded.privacy_level_floor, Some(1));
+        assert_eq!(loaded.provider_allowlist, Some(vec!["ollama".to_string()]));
+
+        let replacement = hiddensteps_enterprise_policy::EnterprisePolicy {
+            policy_source: Some("corp-mdm-v2".to_string()),
+            privacy_level_floor: Some(2),
+            provider_allowlist: None,
+        };
+        store.set_enterprise_policy(&replacement).unwrap();
+        let reloaded = store.get_enterprise_policy().unwrap().unwrap();
+        assert_eq!(reloaded.policy_source, Some("corp-mdm-v2".to_string()));
+        assert_eq!(reloaded.privacy_level_floor, Some(2));
+        assert_eq!(reloaded.provider_allowlist, None);
     }
 
     #[test]

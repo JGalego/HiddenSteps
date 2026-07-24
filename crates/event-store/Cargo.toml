@@ -7,6 +7,7 @@ publish.workspace = true
 
 [dependencies]
 hiddensteps-domain = { path = "../domain" }
+hiddensteps-enterprise-policy = { path = "../enterprise-policy" }
 serde.workspace = true
 serde_json.workspace = true
 time.workspace = true

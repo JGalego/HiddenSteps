@@ -1600,6 +1600,7 @@ name = "hiddensteps-event-store"
 version = "0.1.3"
 dependencies = [
  "hiddensteps-domain",
+ "hiddensteps-enterprise-policy",
  "rusqlite",
  "serde",
  "serde_json",

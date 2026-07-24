@@ -175,6 +175,18 @@ pub async fn set_ai_provider(
     state: State<'_, AppState>,
     request: SetAiProviderRequest,
 ) -> Result<bool, String> {
+    if !state
+        .enterprise_policy
+        .lock()
+        .await
+        .is_provider_allowed(&request.id)
+    {
+        return Err(format!(
+            "'{}' is not on this device's enterprise-approved provider list",
+            request.id
+        ));
+    }
+
     let vault_key_ref = if let Some(api_key) = &request.api_key {
         let secret_store = hiddensteps_security::KeyringSecretStore::new(crate::VAULT_SERVICE);
         let entry_name = format!("provider-key-{}", request.id);
@@ -230,10 +242,20 @@ pub async fn set_privacy_level(
     state: State<'_, AppState>,
     request: SetPrivacyLevelRequest,
 ) -> Result<SetPrivacyLevelResponse, String> {
-    let new_level = PrivacyLevel::from_u8(request.level).map_err(to_err)?;
+    let requested_level = PrivacyLevel::from_u8(request.level).map_err(to_err)?;
+    // An enterprise policy's privacy-level floor (docs/design/05-privacy-model.md
+    // §6) can only raise what the user picked, never lower it — enforced here,
+    // not silently accepted and left for some other layer to catch, since this
+    // command is the one place a privacy level is actually written.
+    let effective_level = state
+        .enterprise_policy
+        .lock()
+        .await
+        .effective_privacy_level(requested_level);
+
     let mut current = state.store.get_privacy_state().map_err(to_err)?;
     let old_level = current.current_level;
-    current.current_level = new_level;
+    current.current_level = effective_level;
     current.updated_at = OffsetDateTime::now_utc();
     state.store.set_privacy_state(&current).map_err(to_err)?;
 
@@ -242,12 +264,16 @@ pub async fn set_privacy_level(
         .append_audit_entry(&AuditEntry::new(
             AuditActor::User,
             "privacy_level_changed",
-            serde_json::json!({ "from": old_level.as_u8(), "to": new_level.as_u8() }),
+            serde_json::json!({
+                "from": old_level.as_u8(),
+                "requested": requested_level.as_u8(),
+                "to": effective_level.as_u8(),
+            }),
         ))
         .map_err(to_err)?;
 
     Ok(SetPrivacyLevelResponse {
-        effective_level: new_level.as_u8(),
+        effective_level: effective_level.as_u8(),
     })
 }
 

@@ -43,6 +43,43 @@ fn resolve_master_key(secret_store: &KeyringSecretStore) -> [u8; 32] {
     key
 }
 
+/// Applies an enterprise policy per `docs/design/05-privacy-model.md` §6 and
+/// `docs/design/08-plugin-architecture.md` §6. The full `PolicyLoader` plugin
+/// interface those docs describe (a connector to an enterprise
+/// config-management system) isn't built — this is the interim, real
+/// mechanism: an IT admin (or a Portable Mode / enterprise deployment script)
+/// drops a `enterprise-policy.json` file into the app's data directory. If
+/// present, it's parsed, persisted (so it keeps applying even if the file is
+/// later removed — matching how an MDM-pushed profile behaves), and used for
+/// this launch. If absent, whatever policy was last persisted is reused, so a
+/// removed file doesn't silently revert an already-applied floor/allowlist.
+/// No policy ever having been applied — the common case — falls through to
+/// `EnterprisePolicy::default()`, which imposes no constraints at all.
+fn resolve_enterprise_policy(
+    data_dir: &std::path::Path,
+    store: &SqlCipherEventStore,
+) -> EnterprisePolicy {
+    let policy_file = data_dir.join("enterprise-policy.json");
+    if let Ok(contents) = std::fs::read_to_string(&policy_file) {
+        match EnterprisePolicy::parse(&contents) {
+            Ok(policy) => {
+                let _ = store.set_enterprise_policy(&policy);
+                return policy;
+            }
+            Err(_) => {
+                // An unparsable policy file is not fatal to app startup —
+                // fall through to whatever was last persisted (or the
+                // no-constraints default) rather than refusing to launch.
+            }
+        }
+    }
+    store
+        .get_enterprise_policy()
+        .ok()
+        .flatten()
+        .unwrap_or_default()
+}
+
 pub(crate) fn data_dir() -> std::path::PathBuf {
     dirs_next_data_dir().join("hiddensteps.db")
 }
@@ -101,10 +138,12 @@ fn main() {
         gate.grant_general_cloud_consent();
     }
 
+    let enterprise_policy = resolve_enterprise_policy(&dir, &store);
+
     let app_state = state::AppState {
         store: store.clone(),
         gate: Mutex::new(gate),
-        enterprise_policy: Mutex::new(EnterprisePolicy::default()),
+        enterprise_policy: Mutex::new(enterprise_policy),
         observation_task: Mutex::new(None),
     };
 

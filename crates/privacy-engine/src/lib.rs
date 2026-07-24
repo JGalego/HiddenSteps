@@ -5,9 +5,17 @@
 //!
 //! Enterprise policy interaction (§6 of the same doc — a policy pack may raise a
 //! privacy-level floor or narrow the provider allowlist, but cannot loosen any
-//! rule in this crate) is implemented in `hiddensteps-enterprise-policy`, which
-//! composes with `DispatchGate` rather than modifying it — this crate has no API
-//! that would let a policy weaken what's enforced here.
+//! rule in this crate) is **not** implemented inside this crate: a policy's two
+//! knobs (`hiddensteps_enterprise_policy::EnterprisePolicy::effective_privacy_level`/
+//! `is_provider_allowed`) constrain *which* privacy level and provider a user
+//! can select in the first place — that's enforced where those selections are
+//! made (`apps/desktop/src-tauri/src/commands.rs`'s `set_privacy_level`/
+//! `set_ai_provider`), not inside `DispatchGate`, whose own job (per-dispatch
+//! cloud-eligibility given whatever level and provider are already in effect)
+//! has no notion of provider identity or policy at all. This crate has no API
+//! that would let a policy weaken what's enforced here — nor does it need one,
+//! since a policy never gets the chance to affect a level/provider `DispatchGate`
+//! wasn't going to see anyway.
 
 mod consent;
 mod gate;
