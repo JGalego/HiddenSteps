@@ -275,8 +275,15 @@ impl SqlCipherEventStore {
     /// unreadable even if a copy survives) is the caller's responsibility — this
     /// method only clears the store's own contents, per the Security Layer /
     /// EventStore split in `docs/design/02-system-architecture.md`.
+    ///
+    /// The deletes and the privacy-state reset run inside one transaction —
+    /// a crash or error partway through must not leave the store partially
+    /// cleared (some tables wiped, others not), which would undermine the
+    /// "delete all my data" trust guarantee more than failing outright would.
+    /// `VACUUM` can't run inside a transaction (SQLite rejects it), so it
+    /// runs afterward, once the transactional part has definitely committed.
     pub fn delete_all_data(&self) -> Result<(), EventStoreError> {
-        let conn = self.conn.lock().expect("event store mutex poisoned");
+        let mut conn = self.conn.lock().expect("event store mutex poisoned");
         const TABLES: &[&str] = &[
             "pattern_events",
             "pattern_embeddings",
@@ -291,16 +298,18 @@ impl SqlCipherEventStore {
             "settings",
             "enterprise_policy",
         ];
+        let tx = conn.transaction()?;
         for table in TABLES {
-            conn.execute(&format!("DELETE FROM {table}"), [])?;
+            tx.execute(&format!("DELETE FROM {table}"), [])?;
         }
-        conn.execute(
+        tx.execute(
             "UPDATE privacy_state
              SET current_level = 0, consented_manifest_version = 0,
                  observation_active = 0, updated_at = ?1
              WHERE id = 1",
             params![to_rfc3339(OffsetDateTime::now_utc())],
         )?;
+        tx.commit()?;
         conn.execute_batch("VACUUM;")?;
         Ok(())
     }
