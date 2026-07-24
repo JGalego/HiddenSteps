@@ -1,0 +1,25 @@
+# Code owners for HiddenSteps. These owners are requested for review
+# automatically when a PR touches matching paths. See
+# https://docs.github.com/articles/about-code-owners
+
+# Default owner for everything not matched more specifically below.
+*                                   @JGalego
+
+# Privacy/security-critical crates — changes here affect the guarantees the
+# whole product rests on, so they always want owner review regardless of who
+# else is added.
+/crates/redaction/                  @JGalego
+/crates/privacy-engine/             @JGalego
+/crates/security/                   @JGalego
+/crates/plugin-host/                @JGalego
+/crates/enterprise-policy/          @JGalego
+
+# The design/privacy/threat-model docs are the spec; changes to them are
+# effectively changes to the contract.
+/docs/design/                       @JGalego
+/docs/research/06-threat-model.md   @JGalego
+/SECURITY.md                        @JGalego
+
+# CI/release and dependency policy.
+/.github/                           @JGalego
+/deny.toml                          @JGalego

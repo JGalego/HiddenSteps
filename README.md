@@ -117,6 +117,8 @@ apps/desktop/ The Tauri shell + React/TypeScript UI — see apps/desktop/README.
 
 Genuinely welcome, especially: actually running a release build day-to-day and reporting back what breaks; a real design pass on the app icon; signing/notarization setup (there is none yet — see the release notes); and filling in any of the disclosed gaps listed throughout `crates/README.md` and `apps/desktop/*/README.md`.
 
+See **[CONTRIBUTING.md](CONTRIBUTING.md)** for setup, the checks to run before opening a PR, and the ground rules; report security issues privately per **[SECURITY.md](SECURITY.md)**.
+
 ## License
 
 [MIT](LICENSE).
