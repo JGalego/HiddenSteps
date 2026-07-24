@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { tauriBridge, type LlmProviderConfig, type PrivacyState } from "../tauriBridge";
+import { acknowledgedPermissionsFor } from "../privacyLevels";
 
 /**
  * docs/ux/05-settings-and-complexity-tiers.md's Privacy/AI-Provider sections.
@@ -37,7 +38,7 @@ export function SettingsPage() {
 
   const changeLevel = async (level: number) => {
     try {
-      await tauriBridge.setPrivacyLevel(level, ["acknowledged"]);
+      await tauriBridge.setPrivacyLevel(level, acknowledgedPermissionsFor(level));
       await refresh();
     } catch (e) {
       setError(String(e));

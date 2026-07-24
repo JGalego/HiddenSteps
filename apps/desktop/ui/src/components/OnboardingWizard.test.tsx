@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { OnboardingWizard } from "./OnboardingWizard";
 import { tauriBridge } from "../tauriBridge";
+import { acknowledgedPermissionsFor } from "../privacyLevels";
 
 vi.mock("../tauriBridge", () => ({
   tauriBridge: {
@@ -167,7 +168,7 @@ describe("OnboardingWizard", () => {
       model_name: "qwen2.5:7b-instruct",
       api_key: undefined,
     });
-    expect(mockedBridge.setPrivacyLevel).toHaveBeenCalledWith(1, ["acknowledged"]);
+    expect(mockedBridge.setPrivacyLevel).toHaveBeenCalledWith(1, acknowledgedPermissionsFor(1));
     expect(mockedBridge.completeOnboarding).toHaveBeenCalledOnce();
     expect(onComplete).toHaveBeenCalledOnce();
     expect(await screen.findByText("✓ HiddenSteps is now observing")).toBeInTheDocument();

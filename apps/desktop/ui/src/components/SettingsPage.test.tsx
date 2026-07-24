@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SettingsPage } from "./SettingsPage";
 import { tauriBridge } from "../tauriBridge";
+import { acknowledgedPermissionsFor } from "../privacyLevels";
 
 vi.mock("../tauriBridge", () => ({
   tauriBridge: {
@@ -55,7 +56,7 @@ describe("SettingsPage", () => {
     await screen.findByText("2");
 
     await user.click(screen.getByRole("button", { name: "Raise" }));
-    expect(mockedBridge.setPrivacyLevel).toHaveBeenCalledWith(3, ["acknowledged"]);
+    expect(mockedBridge.setPrivacyLevel).toHaveBeenCalledWith(3, acknowledgedPermissionsFor(3));
   });
 
   it("lowering the level calls set_privacy_level with level-1", async () => {
@@ -64,7 +65,7 @@ describe("SettingsPage", () => {
     await screen.findByText("2");
 
     await user.click(screen.getByRole("button", { name: "Lower" }));
-    expect(mockedBridge.setPrivacyLevel).toHaveBeenCalledWith(1, ["acknowledged"]);
+    expect(mockedBridge.setPrivacyLevel).toHaveBeenCalledWith(1, acknowledgedPermissionsFor(1));
   });
 
   it("shows a message when no provider is configured", async () => {

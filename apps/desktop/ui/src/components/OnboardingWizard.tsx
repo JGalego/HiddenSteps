@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { tauriBridge, type DetectedRuntime } from "../tauriBridge";
+import { acknowledgedPermissionsFor } from "../privacyLevels";
 
 const TOTAL_STEPS = 8;
 
@@ -117,7 +118,7 @@ export function OnboardingWizard({ onComplete }: { onComplete: () => void }) {
         model_name: selectedModel,
         api_key: apiKey || undefined,
       });
-      await tauriBridge.setPrivacyLevel(privacyLevel, ["acknowledged"]);
+      await tauriBridge.setPrivacyLevel(privacyLevel, acknowledgedPermissionsFor(privacyLevel));
       await tauriBridge.completeOnboarding();
       next(); // to the confirmation screen
       onComplete();

@@ -246,6 +246,13 @@ pub async fn set_ai_provider(
 #[derive(Serialize, Deserialize)]
 pub struct SetPrivacyLevelRequest {
     pub level: u8,
+    /// The specific permission descriptors the user was shown and
+    /// acknowledged for the level they're moving to (e.g.
+    /// `["app_focus", "window_title"]`). Recorded verbatim in the audit log
+    /// so the acknowledgment is an actual, inspectable record rather than a
+    /// cosmetic gesture — and required to be non-empty when raising to any
+    /// observing level, so a level change can't slip through claiming an
+    /// acknowledgment that never carried what was acknowledged.
     pub acknowledged_permissions: Vec<String>,
 }
 
@@ -260,6 +267,19 @@ pub async fn set_privacy_level(
     request: SetPrivacyLevelRequest,
 ) -> Result<SetPrivacyLevelResponse, String> {
     let requested_level = PrivacyLevel::from_u8(request.level).map_err(to_err)?;
+
+    // Raising to any level that actually observes requires the caller to
+    // carry the permissions the user acknowledged for it (FR-17: no
+    // observation without informed consent). Manual (level 0) observes
+    // nothing, so it needs no acknowledgment. This makes the field a real
+    // precondition rather than the cosmetic, never-read literal it used to be.
+    if requested_level != PrivacyLevel::Manual && request.acknowledged_permissions.is_empty() {
+        return Err(format!(
+            "raising to privacy level {} requires acknowledging the permissions it introduces",
+            requested_level.as_u8()
+        ));
+    }
+
     // An enterprise policy's privacy-level floor (docs/design/05-privacy-model.md
     // §6) can only raise what the user picked, never lower it — enforced here,
     // not silently accepted and left for some other layer to catch, since this
@@ -285,6 +305,7 @@ pub async fn set_privacy_level(
                 "from": old_level.as_u8(),
                 "requested": requested_level.as_u8(),
                 "to": effective_level.as_u8(),
+                "acknowledged_permissions": request.acknowledged_permissions,
             }),
         ),
     );
