@@ -48,6 +48,26 @@ export interface Recommendation {
   dismissal_reason: string | null;
 }
 
+export interface Pattern {
+  id: number | null;
+  first_seen_at: string;
+  last_seen_at: string;
+  occurrence_count: number;
+  estimated_minutes_per_occurrence: number | null;
+  sequence_signature: unknown;
+  status: "active" | "stale" | "dismissed";
+}
+
+/**
+ * The `get_recommendation_detail` response: a `Recommendation` (its fields
+ * flattened in at the top level, per the backend's `#[serde(flatten)]`) plus
+ * the actual observed events that produced it — the FR-13 traceability trail
+ * behind "Why?" that the list endpoint doesn't carry.
+ */
+export type RecommendationDetail = Recommendation & {
+  contributing_events: EventSummary[];
+};
+
 export interface OnboardingState {
   completed: boolean;
 }
@@ -160,8 +180,14 @@ export const tauriBridge = {
 
   deleteAllData: (): Promise<boolean> => invoke("delete_all_data"),
 
+  listPatterns: (statusFilter?: string): Promise<Pattern[]> =>
+    invoke("list_patterns", { statusFilter }),
+
   listRecommendations: (statusFilter?: string): Promise<Recommendation[]> =>
     invoke("list_recommendations", { statusFilter }),
+
+  getRecommendationDetail: (id: number): Promise<RecommendationDetail> =>
+    invoke("get_recommendation_detail", { id }),
 
   setRecommendationStatus: (
     id: number,

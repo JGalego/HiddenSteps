@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { tauriBridge, type Recommendation } from "../tauriBridge";
+import { tauriBridge, type EventSummary, type Recommendation } from "../tauriBridge";
 
 const CONFIDENCE_DOTS = 5;
 
@@ -24,6 +24,26 @@ export function RecommendationCard({
 }) {
   const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The list endpoint doesn't carry the contributing events (FR-13's "what
+  // observations contributed?"); they're fetched lazily via
+  // get_recommendation_detail the first time the card is expanded, so the
+  // real evidence trail is shown rather than just the recommendation's own
+  // prose about itself.
+  const [contributingEvents, setContributingEvents] = useState<EventSummary[] | null>(null);
+
+  const toggleExpanded = async () => {
+    const nextExpanded = !expanded;
+    setExpanded(nextExpanded);
+    if (nextExpanded && contributingEvents === null && recommendation.id != null) {
+      try {
+        const detail = await tauriBridge.getRecommendationDetail(recommendation.id);
+        setContributingEvents(detail.contributing_events);
+        setError(null);
+      } catch (e) {
+        setError(String(e));
+      }
+    }
+  };
 
   const markImplemented = async () => {
     try {
@@ -66,7 +86,7 @@ export function RecommendationCard({
       </p>
 
       <div className="btn-row">
-        <button className="btn" type="button" onClick={() => setExpanded((v) => !v)}>
+        <button className="btn" type="button" onClick={toggleExpanded}>
           {expanded ? "Hide details" : "Why?"}
         </button>
       </div>
@@ -75,6 +95,21 @@ export function RecommendationCard({
         <div className="recommendation-detail" data-testid="recommendation-detail">
           <h4>Why this recommendation</h4>
           <p>{recommendation.why}</p>
+
+          <h4>What we actually observed</h4>
+          {contributingEvents === null ? (
+            <p>Loading the observations behind this…</p>
+          ) : contributingEvents.length === 0 ? (
+            <p>No individual observations are still on record for this pattern.</p>
+          ) : (
+            <ul className="contributing-events" data-testid="contributing-events">
+              {contributingEvents.map((event) => (
+                <li key={event.id ?? `${event.source_id}-${event.occurred_at}`}>
+                  <time>{event.occurred_at}</time> {event.source_id} — {event.signal_type}
+                </li>
+              ))}
+            </ul>
+          )}
 
           <h4>Assumptions made</h4>
           <ul>

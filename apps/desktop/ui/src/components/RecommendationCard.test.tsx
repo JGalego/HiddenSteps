@@ -7,6 +7,7 @@ import { tauriBridge, type Recommendation } from "../tauriBridge";
 vi.mock("../tauriBridge", () => ({
   tauriBridge: {
     setRecommendationStatus: vi.fn(),
+    getRecommendationDetail: vi.fn(),
   },
 }));
 
@@ -41,6 +42,10 @@ const sample: Recommendation = {
 describe("RecommendationCard", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    mockedBridge.getRecommendationDetail.mockResolvedValue({
+      ...sample,
+      contributing_events: [],
+    });
   });
 
   it("shows the estimated time saved and category from PROMPT.md's own example shape", () => {
@@ -65,6 +70,33 @@ describe("RecommendationCard", () => {
     expect(detail).toHaveTextContent(sample.ignored_information[0]);
     expect(detail).toHaveTextContent("Excel macro");
     expect(detail).toHaveTextContent("Python script");
+  });
+
+  it("fetches and shows the contributing-events evidence trail when expanded", async () => {
+    const user = userEvent.setup();
+    mockedBridge.getRecommendationDetail.mockResolvedValue({
+      ...sample,
+      contributing_events: [
+        {
+          id: 101,
+          occurred_at: "2026-07-16T10:42:03Z",
+          source_id: "linux.active_window",
+          signal_type: "app_focus_change",
+          privacy_level_at_capture: 1,
+          summary: { app: "Jira" },
+          is_deep_mode: false,
+          ttl_expires_at: null,
+        },
+      ],
+    });
+    render(<RecommendationCard recommendation={sample} />);
+
+    await user.click(screen.getByRole("button", { name: "Why?" }));
+
+    expect(mockedBridge.getRecommendationDetail).toHaveBeenCalledWith(42);
+    const events = await screen.findByTestId("contributing-events");
+    expect(events).toHaveTextContent("linux.active_window");
+    expect(events).toHaveTextContent("app_focus_change");
   });
 
   it("marking implemented calls set_recommendation_status with the implemented status", async () => {
