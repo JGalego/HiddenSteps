@@ -176,11 +176,10 @@ pub fn detect_all(text: &str) -> Vec<Detection> {
     );
 
     for m in CREDIT_CARD_CANDIDATE.find_iter(text) {
-        let digits: String = m.as_str().chars().filter(|c| c.is_ascii_digit()).collect();
-        if digits.len() >= 13 && digits.len() <= 19 && luhn_valid(&digits) {
+        if let Some((start, end)) = find_luhn_valid_window(m.as_str(), m.start()) {
             detections.push(Detection {
-                start: m.start(),
-                end: m.end(),
+                start,
+                end,
                 category: Category::CreditCard,
                 confidence: Confidence::High,
             });
@@ -237,6 +236,50 @@ fn push_matches(
 
 fn ranges_overlap(a_start: usize, a_end: usize, b_start: usize, b_end: usize) -> bool {
     a_start < b_end && b_start < a_end
+}
+
+/// Checks a credit-card candidate span for a Luhn-valid card number, allowing
+/// for up to one stray extra digit adjacent to it (a mistyped check digit, a
+/// concatenated short id) rather than only the whole span's digit count.
+/// Checking only the full span misses a real card number that's otherwise
+/// valid: e.g. a 16-digit card with one extra digit appended makes the
+/// *combined* 17-digit span fail Luhn even though the genuine card number
+/// within it still validates on its own.
+///
+/// Deliberately bounded to the full span's length and one-shorter, not all
+/// the way down to 13 regardless of the candidate's total length — the
+/// point is tolerating one stray digit next to a real card, not searching an
+/// arbitrarily long digit run for any 13-digit substring that happens to
+/// pass Luhn by chance, which would make the detector fire on far more
+/// coincidental non-card digit runs (order numbers, phone numbers, ids).
+/// Windows are tried longest-first so a shorter coincidental match doesn't
+/// pre-empt the genuine full-length one. Returns the byte range (in the
+/// original text) of the first valid window found.
+fn find_luhn_valid_window(candidate: &str, candidate_start: usize) -> Option<(usize, usize)> {
+    let digit_positions: Vec<(char, usize)> = candidate
+        .char_indices()
+        .filter(|(_, c)| c.is_ascii_digit())
+        .map(|(i, c)| (c, candidate_start + i))
+        .collect();
+    let total = digit_positions.len();
+    if total < 13 {
+        return None;
+    }
+    let max_len = total.min(19);
+    let min_len = max_len.saturating_sub(1).max(13);
+
+    for window_len in (min_len..=max_len).rev() {
+        for start_idx in 0..=(digit_positions.len() - window_len) {
+            let window = &digit_positions[start_idx..start_idx + window_len];
+            let digits: String = window.iter().map(|(c, _)| *c).collect();
+            if luhn_valid(&digits) {
+                let start = window[0].1;
+                let end = window[window.len() - 1].1 + 1;
+                return Some((start, end));
+            }
+        }
+    }
+    None
 }
 
 /// Standard Luhn checksum, used to reject plausible-but-invalid "13-19 digit"
@@ -370,5 +413,30 @@ mod tests {
     #[test]
     fn luhn_rejects_all_same_digit_runs() {
         assert!(!luhn_valid("1111111111111111"));
+    }
+
+    #[test]
+    fn detects_a_valid_card_number_padded_with_an_extra_trailing_digit() {
+        // Regression test: 4532015112830366 is Luhn-valid on its own, but the
+        // Luhn check used to run over the *entire* matched 13-19-digit span,
+        // so appending one extra digit (17 digits total) made the combined
+        // span fail Luhn and the real card number was never flagged at all.
+        let text = "card 45320151128303661 on file";
+        let detections = detect_all(text);
+        assert!(
+            detections
+                .iter()
+                .any(|d| d.category == Category::CreditCard),
+            "a genuine card number padded with an extra digit must still be detected"
+        );
+    }
+
+    #[test]
+    fn detects_a_valid_card_number_with_a_leading_extra_digit() {
+        let text = "card 14532015112830366 on file";
+        let detections = detect_all(text);
+        assert!(detections
+            .iter()
+            .any(|d| d.category == Category::CreditCard));
     }
 }
