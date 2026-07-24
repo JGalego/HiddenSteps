@@ -1,5 +1,6 @@
 use argon2::{Algorithm, Argon2, Params, Version};
-use rand::RngCore;
+use rand::rand_core::UnwrapErr;
+use rand::Rng;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// A key derived from a user-supplied passphrase, plus the salt needed to re-derive
@@ -33,7 +34,7 @@ pub fn derive_key_from_passphrase(
 ) -> Result<PassphraseKey, PassphraseError> {
     let salt = salt.unwrap_or_else(|| {
         let mut s = [0u8; 16];
-        rand::rngs::OsRng.fill_bytes(&mut s);
+        UnwrapErr(rand::rngs::SysRng).fill_bytes(&mut s);
         s
     });
 
