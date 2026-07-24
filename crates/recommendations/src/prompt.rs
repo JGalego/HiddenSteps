@@ -67,11 +67,31 @@ pub fn build_prompt(pattern_id_hint: &str, detected: &DetectedPattern) -> String
 /// Extracts the first balanced `{...}` object from `text` — models routinely wrap
 /// JSON in prose or markdown fences despite instructions not to; this recovers
 /// the object without requiring the whole response to be nothing but JSON.
+///
+/// Brace-depth counting has to be string-aware: a `{`/`}` character inside a
+/// JSON *string value* (e.g. `"why": "wrap the {ticket} placeholder"`) isn't
+/// a structural brace at all. Counting every brace regardless of whether it's
+/// inside a string closes the object too early (or never finds the real
+/// close at all), breaking extraction — and burning a synthesis retry — on a
+/// realistic LLM response that happens to mention a literal brace.
 pub fn extract_json_object(text: &str) -> Option<&str> {
     let start = text.find('{')?;
     let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escaped = false;
     for (offset, ch) in text[start..].char_indices() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
         match ch {
+            '"' => in_string = true,
             '{' => depth += 1,
             '}' => {
                 depth -= 1;
@@ -104,5 +124,30 @@ mod tests {
     #[test]
     fn returns_none_when_no_object_is_present() {
         assert_eq!(extract_json_object("no json here"), None);
+    }
+
+    #[test]
+    fn a_brace_character_inside_a_string_value_does_not_confuse_the_depth_count() {
+        // Regression test: naive depth counting over every '{'/'}' regardless
+        // of whether it's inside a string closed this object one character
+        // too early (right after the string's literal '}'), or in more
+        // realistic cases never found the true close at all.
+        let text = r#"{"why": "wrap the {ticket} placeholder", "confidence": 0.9}"#;
+        assert_eq!(extract_json_object(text), Some(text));
+    }
+
+    #[test]
+    fn an_unbalanced_brace_count_inside_a_string_value_does_not_break_extraction() {
+        // A string value with more '{' than '}' (or vice versa) would, under
+        // naive counting, shift the depth permanently — either closing
+        // before the real end or never reaching depth 0 at all.
+        let text = r#"{"why": "use {{ handlebars }} style templating", "confidence": 0.9}"#;
+        assert_eq!(extract_json_object(text), Some(text));
+    }
+
+    #[test]
+    fn an_escaped_quote_inside_a_string_value_does_not_end_the_string_early() {
+        let text = r#"{"why": "the setting is called \"auto-save\" and uses { } braces", "confidence": 0.9}"#;
+        assert_eq!(extract_json_object(text), Some(text));
     }
 }
