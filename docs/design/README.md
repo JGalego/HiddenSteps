@@ -2,6 +2,8 @@
 
 Phase 2 deliverable set, per `PROMPT.md`. Builds directly on the Phase 1 research (`../research/`) — every non-obvious decision below traces back to a specific finding, risk, or principle established there.
 
+> **These are design documents — the target system, not necessarily the shipped one.** They describe what HiddenSteps is designed to be; several parts are ahead of what's implemented today (the embedding store's mechanism, the full plugin-management lifecycle, exclusion rules, complexity tiers, browser-domain observation). For the honest, current *implementation* state, [`../../crates/README.md`](../../crates/README.md) and [`../../apps/desktop/README.md`](../../apps/desktop/README.md) are the ground truth; individual docs below carry an "Implementation note" where they differ materially from what's built.
+
 ## Reading order
 
 1. [01-prd.md](01-prd.md) — Product Requirements Document: goals, non-goals, personas, functional/non-functional requirements, success metrics, explicit exclusions.

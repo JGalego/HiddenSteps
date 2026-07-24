@@ -2,6 +2,8 @@
 
 Phase 3 deliverable set, per `PROMPT.md`. Every screen and interaction here is a direct rendering of a guarantee established in Phase 2 (`../design/`) — the UX's job is to make those guarantees legible, not to introduce new ones.
 
+> **These wireframes describe the target UX, not necessarily the shipped UI.** Parts are ahead of what's built — the complexity-tier filter, plugin-management screens, browser-domain capture in the dashboard feed, and the full accessibility bar (i18n, high-contrast theme). [`../../apps/desktop/ui/README.md`](../../apps/desktop/ui/README.md) is the ground truth for what the UI actually does today; individual docs carry an "Implementation note" where they differ.
+
 ## Reading order
 
 1. [01-user-journeys.md](01-user-journeys.md) — five end-to-end journeys (first 24 hours, daily trust verification, recommendation review, enterprise deployment, portable mode) mapped to the personas in [../design/01-prd.md](../design/01-prd.md).

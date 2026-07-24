@@ -60,6 +60,15 @@ flowchart TB
 
 ## 2. Module responsibilities
 
+> **Implementation note (v0.1.x).** This table maps PROMPT.md's 14 suggested
+> modules to a *target* crate layout; the shipped 12-crate workspace differs.
+> Workflow Graph is folded into `hiddensteps-patterns` (not a standalone
+> `workflow-graph` crate), the Embedding Layer is folded into
+> `hiddensteps-event-store` (no standalone `embeddings` crate), and there is no
+> `knowledge-base` crate — it was never built. Shipped crates are all prefixed
+> `hiddensteps-`. See [`../../crates/README.md`](../../crates/README.md) for the
+> real crate list and status.
+
 | PROMPT.md module | Crate | Layer | Responsibility | Key ports (traits) |
 |---|---|---|---|---|
 | Observation Engine | `observation-*` (per platform/signal) | Infrastructure | Capture raw signals per active manifest; never persists raw data itself | `ObservationSource` |
