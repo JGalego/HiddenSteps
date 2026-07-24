@@ -88,7 +88,17 @@ static KEY_VALUE_SECRET: Lazy<Regex> = Lazy::new(|| {
 
 static EMAIL: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b").unwrap());
-static SSN: Lazy<Regex> = Lazy::new(|| Regex::new(r"\b\d{3}-\d{2}-\d{4}\b").unwrap());
+/// SSN-shaped 9-digit sequences in each of the three ways a real one is
+/// commonly written: dashed, space-separated, and with no separator at all.
+/// The dashless/space forms are much more generic-looking than the dashed
+/// one (any isolated 9-digit number could be an order id, a phone number
+/// without formatting, ...), so all three are additionally checked against
+/// `is_plausible_ssn`'s real SSA structural rules rather than accepted on
+/// shape alone — cutting down false positives without giving up on catching
+/// a real SSN just because it happens to be missing its dashes.
+static SSN_DASHED: Lazy<Regex> = Lazy::new(|| Regex::new(r"\b(\d{3})-(\d{2})-(\d{4})\b").unwrap());
+static SSN_SPACED: Lazy<Regex> = Lazy::new(|| Regex::new(r"\b(\d{3}) (\d{2}) (\d{4})\b").unwrap());
+static SSN_DASHLESS: Lazy<Regex> = Lazy::new(|| Regex::new(r"\b(\d{9})\b").unwrap());
 static CREDIT_CARD_CANDIDATE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\b(?:\d[ -]?){13,19}\b").unwrap());
 static MEDICAL_KEY_VALUE: Lazy<Regex> = Lazy::new(|| {
@@ -167,13 +177,33 @@ pub fn detect_all(text: &str) -> Vec<Detection> {
         Category::Email,
         Confidence::High,
     );
-    push_matches(
-        &mut detections,
-        text,
-        &SSN,
-        Category::GovernmentId,
-        Confidence::High,
-    );
+    for pattern in [&*SSN_DASHED, &*SSN_SPACED] {
+        for m in pattern.captures_iter(text) {
+            let full = m.get(0).unwrap();
+            let (area, group, serial) = (&m[1], &m[2], &m[3]);
+            if is_plausible_ssn(area, group, serial) {
+                detections.push(Detection {
+                    start: full.start(),
+                    end: full.end(),
+                    category: Category::GovernmentId,
+                    confidence: Confidence::High,
+                });
+            }
+        }
+    }
+    for m in SSN_DASHLESS.captures_iter(text) {
+        let full = m.get(0).unwrap();
+        let digits = &m[1];
+        let (area, group, serial) = (&digits[0..3], &digits[3..5], &digits[5..9]);
+        if is_plausible_ssn(area, group, serial) {
+            detections.push(Detection {
+                start: full.start(),
+                end: full.end(),
+                category: Category::GovernmentId,
+                confidence: Confidence::High,
+            });
+        }
+    }
 
     for m in CREDIT_CARD_CANDIDATE.find_iter(text) {
         if let Some((start, end)) = find_luhn_valid_window(m.as_str(), m.start()) {
@@ -236,6 +266,19 @@ fn push_matches(
 
 fn ranges_overlap(a_start: usize, a_end: usize, b_start: usize, b_end: usize) -> bool {
     a_start < b_end && b_start < a_end
+}
+
+/// Real SSA structural rules for a Social Security Number: the area group
+/// (first 3 digits) is never 000, 666, or 900-999; the group number (middle
+/// 2 digits) is never 00; the serial (last 4 digits) is never 0000. Used to
+/// keep the dashless/space-separated SSN detectors (which otherwise match
+/// any isolated 9-digit number) from over-firing on unrelated ids and phone
+/// numbers that happen to be 9 digits long.
+fn is_plausible_ssn(area: &str, group: &str, serial: &str) -> bool {
+    let area: u32 = area.parse().unwrap_or(0);
+    let group: u32 = group.parse().unwrap_or(0);
+    let serial: u32 = serial.parse().unwrap_or(0);
+    area != 0 && area != 666 && area < 900 && group != 0 && serial != 0
 }
 
 /// Checks a credit-card candidate span for a Luhn-valid card number, allowing
@@ -362,6 +405,40 @@ mod tests {
         let text = "SSN on file: 123-45-6789";
         let detections = detect_all(text);
         assert!(detections
+            .iter()
+            .any(|d| d.category == Category::GovernmentId));
+    }
+
+    #[test]
+    fn detects_space_separated_ssn() {
+        let text = "SSN on file: 123 45 6789";
+        let detections = detect_all(text);
+        assert!(detections
+            .iter()
+            .any(|d| d.category == Category::GovernmentId));
+    }
+
+    #[test]
+    fn detects_dashless_ssn() {
+        // Regression test: only the dashed format used to be recognized at
+        // all — a real SSN typed or pasted without its separators passed
+        // through completely unredacted, with no entropy fallback either
+        // (it's pure digits, so the mixed-case-required ambiguous-secret
+        // detector never considers it).
+        let text = "SSN on file: 123456789";
+        let detections = detect_all(text);
+        assert!(detections
+            .iter()
+            .any(|d| d.category == Category::GovernmentId));
+    }
+
+    #[test]
+    fn does_not_flag_a_structurally_invalid_ssn_shaped_number() {
+        // Area 000 is never issued — an arbitrary 9-digit id/phone-like
+        // number with this shape should not be treated as a real SSN.
+        let text = "reference number 000456789";
+        let detections = detect_all(text);
+        assert!(!detections
             .iter()
             .any(|d| d.category == Category::GovernmentId));
     }
