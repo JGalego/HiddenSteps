@@ -41,6 +41,13 @@ impl SqlCipherEventStore {
     fn from_connection(conn: Connection, key: &[u8; 32]) -> Result<Self, EventStoreError> {
         apply_key(&conn, key)?;
         verify_key(&conn)?;
+        // SQLite ignores every `REFERENCES ... ON DELETE CASCADE`/`SET NULL`
+        // in schema.sql (pattern_events, pattern_embeddings, workflow_edges)
+        // unless foreign-key enforcement is turned on per connection — it's
+        // off by default and was never enabled, so those declarations were
+        // inert: deleting a pattern or event left its dependent rows behind
+        // instead of cascading.
+        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         let store = Self {
             conn: Mutex::new(conn),
         };
@@ -1401,6 +1408,32 @@ mod tests {
         let contributing = store.list_pattern_events(pattern_id).unwrap();
         assert_eq!(contributing.len(), 1);
         assert_eq!(contributing[0].id, Some(event_id));
+    }
+
+    #[test]
+    fn deleting_an_event_cascades_to_its_pattern_events_link() {
+        // Regression test: PRAGMA foreign_keys was never enabled, so
+        // schema.sql's `ON DELETE CASCADE` on pattern_events.event_id was
+        // inert — deleting the referenced event left an orphaned
+        // pattern_events row behind instead of cascading.
+        let store = SqlCipherEventStore::open_in_memory(&test_key()).unwrap();
+        let pattern_id = store.insert_pattern(&sample_pattern()).unwrap();
+        let event_id = store
+            .insert_event_summary(&EventSummary::new(
+                OffsetDateTime::now_utc(),
+                "src",
+                SignalType::AppFocusChange,
+                PrivacyLevel::ApplicationMetadata,
+                serde_json::json!({ "app": "Jira" }),
+                None,
+            ))
+            .unwrap();
+        store.link_pattern_events(pattern_id, &[event_id]).unwrap();
+        assert_eq!(store.list_pattern_events(pattern_id).unwrap().len(), 1);
+
+        store.delete_events(&[event_id]).unwrap();
+
+        assert_eq!(store.list_pattern_events(pattern_id).unwrap().len(), 0);
     }
 
     #[test]
