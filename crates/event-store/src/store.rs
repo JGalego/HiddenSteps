@@ -563,15 +563,27 @@ impl SqlCipherEventStore {
     /// provider, per ADR-0004).
     pub fn set_active_llm_provider(&self, provider_id: &str) -> Result<(), EventStoreError> {
         let conn = self.conn.lock().expect("event store mutex poisoned");
-        let updated = conn.execute(
-            "UPDATE llm_providers SET active = (id = ?1)",
+        // The UPDATE below deliberately has no WHERE clause — it touches every
+        // row so exactly one ends up active, in one statement, rather than a
+        // separate "clear everyone else" pass. That means its affected-row
+        // count is the *table's* size, not whether `provider_id` matched
+        // anything, so existence has to be checked explicitly first: without
+        // this, requesting an unregistered id would silently deactivate every
+        // registered provider and still report success.
+        let exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM llm_providers WHERE id = ?1)",
             params![provider_id],
+            |row| row.get(0),
         )?;
-        if updated == 0 {
+        if !exists {
             return Err(EventStoreError::InvalidStoredValue(format!(
                 "no llm_providers row to update (provider '{provider_id}' not registered?)"
             )));
         }
+        conn.execute(
+            "UPDATE llm_providers SET active = (id = ?1)",
+            params![provider_id],
+        )?;
         Ok(())
     }
 
@@ -1489,6 +1501,26 @@ mod tests {
     fn set_active_llm_provider_on_an_unregistered_id_errors_rather_than_silently_no_op() {
         let store = SqlCipherEventStore::open_in_memory(&test_key()).unwrap();
         assert!(store.set_active_llm_provider("does-not-exist").is_err());
+    }
+
+    #[test]
+    fn set_active_llm_provider_on_an_unregistered_id_leaves_existing_providers_untouched() {
+        // Regression test: the underlying UPDATE has no WHERE clause (it sets
+        // `active` on every row so exactly one ends up true), so an
+        // existence check has to happen separately — without it, this exact
+        // scenario (an already-active provider, plus a bogus id) silently
+        // deactivated every registered provider while still returning Ok(()).
+        let store = SqlCipherEventStore::open_in_memory(&test_key()).unwrap();
+        store
+            .upsert_llm_provider(&sample_provider("ollama-local", true))
+            .unwrap();
+        store.set_active_llm_provider("ollama-local").unwrap();
+
+        let result = store.set_active_llm_provider("does-not-exist");
+        assert!(result.is_err());
+
+        let active = store.get_active_llm_provider().unwrap();
+        assert_eq!(active.map(|p| p.id), Some("ollama-local".to_string()));
     }
 
     #[test]
