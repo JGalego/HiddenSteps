@@ -2,14 +2,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use hiddensteps_domain::{
-    AuditActor, AuditEntry, LlmProviderConfig, Pattern, PatternStatus, PrivacyState,
+    AuditActor, AuditEntry, LlmProviderConfig, Pattern, PatternStatus, PrivacyLevel, PrivacyState,
 };
 use hiddensteps_event_store::SqlCipherEventStore;
 use hiddensteps_llm_provider::{
-    AnthropicProvider, LlmProvider, OllamaProvider, OpenAiCompatibleProvider,
+    AnthropicProvider, CompletionRequest, CompletionResponse, LlmProvider, OllamaProvider,
+    OpenAiCompatibleProvider, ProviderError,
 };
 use hiddensteps_patterns::{DetectedPattern, PatternDetector};
-use hiddensteps_privacy_engine::DispatchDecision;
+use hiddensteps_privacy_engine::{DispatchDecision, PrivacyGatedProvider};
 use hiddensteps_recommendations::Synthesizer;
 use hiddensteps_security::{KeyringSecretStore, SecretStore};
 use tauri::{AppHandle, Emitter, Manager};
@@ -124,16 +125,25 @@ async fn try_synthesize(
         return; // Misconfigured provider (no model chosen, etc.) — same as above.
     };
 
-    let decision = {
+    let gate_snapshot = {
         let state = app.state::<crate::state::AppState>();
-        let gate = state.gate.lock().await;
-        gate.evaluate(
-            provider.is_local(),
-            privacy_state.current_level,
-            "pattern_summary",
-            detected.contains_verbatim_strings,
-        )
+        let snapshot = state.gate.lock().await.clone();
+        snapshot
     };
+
+    // A cheap pre-flight check purely so a gate rejection gets its own,
+    // distinct audit-log reason (below) rather than being indistinguishable
+    // from any other synthesis failure. It changes nothing about safety: the
+    // actual dispatch a few lines down goes through `PrivacyGatedProvider`
+    // regardless, which evaluates the same gate again before ever calling the
+    // wrapped provider — so even if this pre-flight check were wrong, removed,
+    // or skipped by some future caller, the real call still can't bypass it.
+    let decision = gate_snapshot.evaluate(
+        provider.is_local(),
+        privacy_state.current_level,
+        "pattern_summary",
+        detected.contains_verbatim_strings,
+    );
     if !matches!(decision, DispatchDecision::Allow) {
         let _ = store.append_audit_entry(&AuditEntry::new(
             AuditActor::System,
@@ -143,7 +153,13 @@ async fn try_synthesize(
         return;
     }
 
-    let synthesizer = Synthesizer::new(provider.as_ref());
+    let gated_provider = PrivacyGatedProvider::new(provider, gate_snapshot);
+    let adapter = GatedSynthesisProvider {
+        gated: &gated_provider,
+        privacy_level: privacy_state.current_level,
+        contains_verbatim_strings: detected.contains_verbatim_strings,
+    };
+    let synthesizer = Synthesizer::new(&adapter);
     match synthesizer.synthesize(pattern_id, detected).await {
         Ok(recommendation) => {
             if store.insert_recommendation(&recommendation).is_ok() {
@@ -157,6 +173,57 @@ async fn try_synthesize(
                 serde_json::json!({ "pattern_id": pattern_id, "error": e.to_string() }),
             ));
         }
+    }
+}
+
+/// Adapts a `PrivacyGatedProvider` to the plain `LlmProvider` trait
+/// `Synthesizer` expects, binding this sweep's fixed gate-evaluation context
+/// (the current privacy level and whether this pattern's signature contains a
+/// verbatim string). Every `complete()` call goes through
+/// `PrivacyGatedProvider::complete_if_allowed` — replacing what used to be a
+/// hand-copied, easy-to-forget-at-a-future-call-site inline gate check with
+/// the actual wrapper type `hiddensteps_privacy_engine::PrivacyGatedProvider`'s
+/// own doc comment says application code wiring the Recommendation Engine
+/// together should be using.
+struct GatedSynthesisProvider<'a> {
+    gated: &'a PrivacyGatedProvider<Box<dyn LlmProvider>>,
+    privacy_level: PrivacyLevel,
+    contains_verbatim_strings: bool,
+}
+
+#[async_trait::async_trait]
+impl<'a> LlmProvider for GatedSynthesisProvider<'a> {
+    fn id(&self) -> &str {
+        self.gated.provider_id()
+    }
+
+    fn is_local(&self) -> bool {
+        self.gated.is_local()
+    }
+
+    async fn complete(
+        &self,
+        request: CompletionRequest,
+    ) -> Result<CompletionResponse, ProviderError> {
+        self.gated
+            .complete_if_allowed(
+                request,
+                self.privacy_level,
+                "pattern_summary",
+                self.contains_verbatim_strings,
+            )
+            .await
+            .map_err(|e| ProviderError::Request(e.to_string()))
+    }
+
+    async fn embed(&self, _text: &str) -> Result<Vec<f32>, ProviderError> {
+        // The Recommendation Engine's Layer 2 only ever calls `complete` —
+        // see `hiddensteps_recommendations::Synthesizer`. Embeddings for
+        // pattern similarity are computed separately (`hiddensteps-event-store`'s
+        // cosine-similarity BLOB store, per crates/README.md), not through an
+        // `LlmProvider` at all, so this adapter has nothing real to delegate
+        // to and no legitimate caller ever reaches it.
+        Err(ProviderError::EmbeddingsUnsupported)
     }
 }
 

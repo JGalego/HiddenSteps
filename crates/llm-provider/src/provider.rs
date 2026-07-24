@@ -56,3 +56,82 @@ pub trait LlmProvider: Send + Sync {
 
     async fn embed(&self, text: &str) -> Result<Vec<f32>, ProviderError>;
 }
+
+/// Lets a `Box<dyn LlmProvider>` (the shape `detect`/config-driven provider
+/// construction naturally produces, since the concrete provider type is only
+/// known at runtime) satisfy a plain `P: LlmProvider` bound directly — needed
+/// by generic wrappers like `hiddensteps_privacy_engine::PrivacyGatedProvider<P>`
+/// that are meant to wrap owned providers, not just `&dyn LlmProvider`
+/// references.
+#[async_trait]
+impl LlmProvider for Box<dyn LlmProvider> {
+    fn id(&self) -> &str {
+        (**self).id()
+    }
+
+    fn is_local(&self) -> bool {
+        (**self).is_local()
+    }
+
+    async fn complete(
+        &self,
+        request: CompletionRequest,
+    ) -> Result<CompletionResponse, ProviderError> {
+        (**self).complete(request).await
+    }
+
+    async fn embed(&self, text: &str) -> Result<Vec<f32>, ProviderError> {
+        (**self).embed(text).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct StubProvider;
+
+    #[async_trait]
+    impl LlmProvider for StubProvider {
+        fn id(&self) -> &str {
+            "stub"
+        }
+        fn is_local(&self) -> bool {
+            true
+        }
+        async fn complete(
+            &self,
+            _request: CompletionRequest,
+        ) -> Result<CompletionResponse, ProviderError> {
+            Ok(CompletionResponse {
+                text: "ok".to_string(),
+            })
+        }
+        async fn embed(&self, _text: &str) -> Result<Vec<f32>, ProviderError> {
+            Ok(vec![0.1])
+        }
+    }
+
+    /// A boxed trait object needs to satisfy a plain `P: LlmProvider` bound
+    /// directly (not just `&dyn LlmProvider`) for generic wrappers like
+    /// `hiddensteps_privacy_engine::PrivacyGatedProvider<P>` to wrap an owned,
+    /// runtime-selected provider — this is the blanket impl that makes that
+    /// possible, exercised here through the trait's full method set.
+    #[tokio::test]
+    async fn boxed_trait_object_satisfies_the_llm_provider_bound_directly() {
+        let boxed: Box<dyn LlmProvider> = Box::new(StubProvider);
+        assert_eq!(boxed.id(), "stub");
+        assert!(boxed.is_local());
+        let response = boxed
+            .complete(CompletionRequest {
+                system: None,
+                prompt: "hi".to_string(),
+                max_tokens: None,
+                think: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(response.text, "ok");
+        assert_eq!(boxed.embed("hi").await.unwrap(), vec![0.1]);
+    }
+}

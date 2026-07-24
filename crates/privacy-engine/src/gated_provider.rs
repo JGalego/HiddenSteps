@@ -44,6 +44,10 @@ impl<P: LlmProvider> PrivacyGatedProvider<P> {
         self.inner.id()
     }
 
+    pub fn is_local(&self) -> bool {
+        self.inner.is_local()
+    }
+
     pub async fn complete_if_allowed(
         &self,
         request: CompletionRequest,
