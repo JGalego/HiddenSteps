@@ -1,5 +1,11 @@
 # Data Flow Diagrams
 
+> **Implementation note.** The "sqlite-vec embeddings" node below is the target
+> mechanism; the shipped store keeps embeddings as BLOBs with Rust-side cosine
+> similarity (same semantics — see ADR-0007's amended note and
+> [`../../crates/README.md`](../../crates/README.md)). The data *flow* is
+> accurate; only that node's backing technology differs.
+
 ## 1. Capture → recommendation (the core loop)
 
 ```mermaid

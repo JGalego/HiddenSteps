@@ -2,6 +2,16 @@
 
 The single most trust-load-bearing surface in the product ([../design/04-trust-model.md](../design/04-trust-model.md) §2) — every trust feature PROMPT.md requires lives here, reachable in one click/shortcut from anywhere in the app or from the tray/menu-bar icon.
 
+> **Implementation note.** The wireframes below are illustrative of the target
+> design. In particular the `Browser observer  domain_visited  github.com` row
+> shows a capability that is **not implemented** — browser-domain observation
+> needs a separate browser-extension component this repo doesn't yet contain
+> (see [`../../CHANGELOG.md`](../../CHANGELOG.md) and
+> [`../../crates/README.md`](../../crates/README.md)). The shipped dashboard
+> shows real rows from the sources that *are* built (active window, clipboard
+> metadata, file operations); no browser rows appear until that component
+> exists.
+
 ## Wireframe — main view
 
 ```
