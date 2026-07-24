@@ -24,7 +24,7 @@
     "@vitejs/plugin-react": "^4.3.3",
     "jest-axe": "^10.0.0",
     "jsdom": "^25.0.1",
-    "typescript": "^5.6.3",
+    "typescript": "^7.0.2",
     "vite": "^5.4.10",
     "vitest": "^2.1.4"
   }
