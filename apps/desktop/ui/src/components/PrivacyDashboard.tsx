@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   tauriBridge,
   type EventSummary,
@@ -27,6 +27,24 @@ export function PrivacyDashboard() {
   const [events, setEvents] = useState<EventSummary[]>([]);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Focus management for the delete-all dialog (docs/ux/06-accessibility.md
+  // §1): the Cancel button is focused on open (never Delete — a stray Enter
+  // must not destroy data), and focus is restored to the button that opened
+  // the dialog when it closes.
+  const deleteTriggerRef = useRef<HTMLButtonElement>(null);
+  const cancelDeleteRef = useRef<HTMLButtonElement>(null);
+
+  const openDeleteConfirm = () => setConfirmingDelete(true);
+  const closeDeleteConfirm = useCallback(() => {
+    setConfirmingDelete(false);
+    deleteTriggerRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    if (confirmingDelete) {
+      cancelDeleteRef.current?.focus();
+    }
+  }, [confirmingDelete]);
 
   const refresh = useCallback(async () => {
     try {
@@ -65,7 +83,7 @@ export function PrivacyDashboard() {
   const confirmDeleteAll = async () => {
     try {
       await tauriBridge.deleteAllData();
-      setConfirmingDelete(false);
+      closeDeleteConfirm();
       await refresh();
     } catch (e) {
       setError(String(e));
@@ -125,7 +143,10 @@ export function PrivacyDashboard() {
         {events.length === 0 ? (
           <p>Nothing captured yet.</p>
         ) : (
-          <ul className="event-list" data-testid="recent-events">
+          // aria-live="polite" per docs/ux/06-accessibility.md §1: new captured
+          // rows are ambient reference information, announced without seizing a
+          // screen-reader user's focus or interrupting their current task.
+          <ul className="event-list" data-testid="recent-events" aria-live="polite">
             {events.map((event) => (
               <li key={event.id ?? `${event.source_id}-${event.occurred_at}`}>
                 <time>{event.occurred_at}</time> {event.source_id} — {event.signal_type}
@@ -137,11 +158,27 @@ export function PrivacyDashboard() {
 
       <div className="section-block">
         {!confirmingDelete ? (
-          <button className="btn btn-danger" type="button" onClick={() => setConfirmingDelete(true)}>
+          <button
+            ref={deleteTriggerRef}
+            className="btn btn-danger"
+            type="button"
+            onClick={openDeleteConfirm}
+          >
             Delete all data
           </button>
         ) : (
-          <div className="confirm-dialog" role="alertdialog" aria-label="Delete all HiddenSteps data?">
+          <div
+            className="confirm-dialog"
+            role="alertdialog"
+            aria-modal="true"
+            aria-label="Delete all HiddenSteps data?"
+            // Esc cancels this destructive dialog (docs/ux/06-accessibility.md
+            // §2). There is deliberately no Enter-to-confirm shortcut — the
+            // "Delete everything" control must be explicitly activated.
+            onKeyDown={(e) => {
+              if (e.key === "Escape") closeDeleteConfirm();
+            }}
+          >
             <p>
               This removes every captured summary, pattern, recommendation, and
               setting — permanently. This cannot be undone.
@@ -151,7 +188,12 @@ export function PrivacyDashboard() {
               this data becomes unreadable.
             </p>
             <div className="btn-row">
-              <button className="btn" type="button" onClick={() => setConfirmingDelete(false)}>
+              <button
+                ref={cancelDeleteRef}
+                className="btn"
+                type="button"
+                onClick={closeDeleteConfirm}
+              >
                 Cancel
               </button>
               <button className="btn btn-danger" type="button" onClick={confirmDeleteAll}>

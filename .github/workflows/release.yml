@@ -10,6 +10,17 @@ name: Release
 # com.apple.quarantine`) past Gatekeeper the first time; Windows may show an
 # unrecognized-publisher SmartScreen prompt. This is disclosed in the release
 # notes, not hidden.
+#
+# To enable signing, a maintainer must supply the certificates as repo secrets
+# and the tauri-action step below picks them up automatically (see
+# https://tauri.app/distribute/sign/):
+#   - macOS:   APPLE_CERTIFICATE (base64 .p12), APPLE_CERTIFICATE_PASSWORD,
+#              APPLE_SIGNING_IDENTITY, APPLE_ID, APPLE_PASSWORD (app-specific),
+#              APPLE_TEAM_ID  — enables Developer-ID signing + notarization.
+#   - Windows: a code-signing cert configured via tauri.conf.json's
+#              bundle.windows.certificateThumbprint (or an Azure Trusted
+#              Signing / SignPath integration).
+# Until those exist, the checksums + SBOM steps below are the integrity story.
 
 on:
   push:
@@ -61,7 +72,8 @@ jobs:
         working-directory: apps/desktop/ui
         run: npm ci
 
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@1ddc7b49b13c3038297360482fcb3e058764d7c9 # v0.6.2
+        id: tauri
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -71,8 +83,54 @@ jobs:
           releaseBody: |
             Early, unsigned build — see the repo README for current status and the honest list of what does and doesn't work yet.
 
+            **Verify your download** against the attached `SHA256SUMS-<os>.txt` for your platform, e.g. `sha256sum -c SHA256SUMS-Linux.txt`. An SBOM (`sbom.spdx.json`) listing the Rust dependencies compiled into the build is attached too.
+
+            These builds are **unsigned** (no code-signing certificates are configured yet), so:
+
             - **macOS**: Gatekeeper will block an unsigned app. Right-click the app → Open, or `xattr -d com.apple.quarantine /path/to/HiddenSteps.app`.
             - **Windows**: SmartScreen may warn about an unrecognized publisher. Click "More info" → "Run anyway".
             - **Linux**: the AppImage should just run (`chmod +x` it first).
           releaseDraft: true
           prerelease: true
+
+      # Integrity + provenance for the artifacts. Real code-signing /
+      # notarization still needs certificates a maintainer must supply (see
+      # the note at the top of this file); until then, published checksums and
+      # an SBOM at least let a downloader verify a build wasn't tampered with in
+      # transit and see exactly what went into it. Tag builds only — a manual
+      # workflow_dispatch dry-run has no release to attach to.
+      - name: Generate SHA-256 checksums for the built artifacts
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          set -euo pipefail
+          sums="SHA256SUMS-${{ runner.os }}.txt"
+          : > "$sums"
+          echo '${{ steps.tauri.outputs.artifactPaths }}' | jq -r '.[]' | while read -r artifact; do
+            [ -f "$artifact" ] || continue
+            if command -v sha256sum >/dev/null 2>&1; then
+              (cd "$(dirname "$artifact")" && sha256sum "$(basename "$artifact")") >> "$GITHUB_WORKSPACE/$sums"
+            else
+              (cd "$(dirname "$artifact")" && shasum -a 256 "$(basename "$artifact")") >> "$GITHUB_WORKSPACE/$sums"
+            fi
+          done
+          cat "$sums"
+
+      - name: Generate an SBOM (Linux only — one is enough for all platforms)
+        if: startsWith(github.ref, 'refs/tags/') && runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo install cargo-sbom --locked
+          (cd apps/desktop/src-tauri && cargo sbom) > sbom.spdx.json
+
+      - name: Attach checksums and SBOM to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=("SHA256SUMS-${{ runner.os }}.txt")
+          [ -f sbom.spdx.json ] && files+=("sbom.spdx.json")
+          gh release upload "${{ github.ref_name }}" "${files[@]}" --clobber --repo "${{ github.repository }}"

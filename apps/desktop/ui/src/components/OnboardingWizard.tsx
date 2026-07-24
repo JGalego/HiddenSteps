@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { tauriBridge, type DetectedRuntime } from "../tauriBridge";
 import { acknowledgedPermissionsFor } from "../privacyLevels";
 
@@ -133,6 +133,16 @@ export function OnboardingWizard({ onComplete }: { onComplete: () => void }) {
     }
   };
 
+  // Move focus to the step region whenever the step changes, so a
+  // screen-reader / keyboard user lands on the new screen's content instead
+  // of being left on the now-unmounted previous button (docs/ux/06-
+  // accessibility.md §1). The region is focusable via tabIndex={-1} (a
+  // programmatic focus target, not a tab stop).
+  const stepRegionRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    stepRegionRef.current?.focus();
+  }, [step]);
+
   return (
     <section className="onboarding-shell" aria-label="HiddenSteps setup" data-testid="onboarding-wizard">
       <div className="step-progress" aria-hidden="true">
@@ -143,6 +153,8 @@ export function OnboardingWizard({ onComplete }: { onComplete: () => void }) {
       <p className="step-indicator-text" data-testid="step-indicator">
         Step {step} of {TOTAL_STEPS}
       </p>
+
+      <div ref={stepRegionRef} tabIndex={-1} className="step-region" aria-live="polite">
 
       {step === 1 && (
         <div className="card">
@@ -376,6 +388,7 @@ export function OnboardingWizard({ onComplete }: { onComplete: () => void }) {
           <p>You'll usually hear from us within a day — sooner if something obvious turns up.</p>
         </div>
       )}
+      </div>
     </section>
   );
 }

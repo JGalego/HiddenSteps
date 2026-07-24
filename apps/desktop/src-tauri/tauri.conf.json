@@ -20,7 +20,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' ipc: http://localhost:* http://127.0.0.1:*"
+      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost"
     },
     "trayIcon": {
       "iconPath": "icons/icon.png",

@@ -167,6 +167,11 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "18"
-      # High/critical advisories fail the job; the dev-only toolchain
-      # (vite/vitest) surface means moderate/low are surfaced but not gating.
-      - run: npm audit --audit-level=high
+      - run: npm ci
+      # Gate on PRODUCTION dependencies only (`--omit=dev`): a vulnerability in
+      # the build/test toolchain (vite/vitest/esbuild) never ships to a user,
+      # so it shouldn't red-line an unrelated PR. High/critical advisories in
+      # anything that actually ships fail the job. A separate, non-gating full
+      # scan surfaces the dev-tool advisories for visibility without blocking.
+      - run: npm audit --omit=dev --audit-level=high
+      - run: npm audit || true

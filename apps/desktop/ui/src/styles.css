@@ -555,3 +555,25 @@ button {
   font-size: 0.9rem;
   margin-bottom: var(--space-4);
 }
+
+/* ---------- Reduced motion (docs/ux/06-accessibility.md §3) ---------- */
+/* Honor the OS "reduce motion" setting: disable every transition/animation
+   entirely rather than merely shortening it, per the accessibility spec. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* A programmatically-focused step region (onboarding) is a focus *target*,
+   not an interactive control — suppress the focus ring that would otherwise
+   draw a box around the whole step. Interactive controls inside it keep their
+   own focus styles. */
+.step-region:focus {
+  outline: none;
+}

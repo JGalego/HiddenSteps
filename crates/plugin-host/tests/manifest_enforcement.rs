@@ -3,7 +3,7 @@
 //! alone leaves open, since it takes a bare `&[Capability]` slice with no
 //! structural link to a `PluginManifest` at all.
 
-use hiddensteps_plugin_host::{Capability, HostError, PluginHost, PluginManifest};
+use hiddensteps_plugin_host::{Capability, HostError, PluginHost, PluginManifest, PluginType};
 
 const BENIGN_MODULE: &str = r#"
 (module
@@ -22,7 +22,7 @@ fn manifest(min_privacy_level: u8, capabilities: Vec<Capability>) -> PluginManif
         id: "com.example.plugin".to_string(),
         name: "Example".to_string(),
         version: "1.0.0".to_string(),
-        plugin_type: "observation_source".to_string(),
+        plugin_type: PluginType::ObservationSource,
         min_privacy_level,
         capabilities,
     }
