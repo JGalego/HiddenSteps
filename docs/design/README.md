@@ -31,6 +31,7 @@ Phase 2 deliverable set, per `PROMPT.md`. Builds directly on the Phase 1 researc
 | [0008](adr/0008-os-credential-vault-key-management.md) | OS credential vault as the sole root of key material |
 | [0009](adr/0009-wasm-plugin-sandbox.md) | WASM component-model sandbox with structural capability enforcement for all plugins |
 | [0010](adr/0010-hybrid-deterministic-plus-llm-recommendation-engine.md) | Recommendation engine: deterministic pattern detection (facts) + LLM synthesis (judgment), validated against drift |
+| [0011](adr/0011-enterprise-policy-two-knob-schema.md) | Enterprise policy as a fixed two-knob, restrict-only schema (privacy-level floor, provider allowlist) — can only tighten, never weaken a guarantee |
 
 ## What's deliberately not in Phase 2
 

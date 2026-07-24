@@ -4,6 +4,18 @@ This formalizes [../research/05-privacy-analysis.md](../research/05-privacy-anal
 
 ## 1. Privacy levels — exact signal enumeration
 
+The **Name** column here is the precise engineering name for each level. The
+user-facing surfaces (the README table and the onboarding wizard) deliberately
+use friendlier labels for the same levels — they are the same levels, just
+worded for a non-technical reader:
+
+| Level | This doc (authoritative) | User-facing label (README / onboarding) |
+|---|---|---|
+| 1 | Application metadata | App awareness |
+| 2 | Workflow metadata | Workflow awareness |
+| 3 | Context-aware | Context-aware |
+| 4 | Maximum assistance | Maximum assistance |
+
 | Level | Name | Signals captured (exact) | OS permission tier required |
 |---|---|---|---|
 | 0 | Manual | None. No `ObservationSource` plugin is active. | None |
