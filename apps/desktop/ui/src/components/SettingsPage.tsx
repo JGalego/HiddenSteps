@@ -36,13 +36,21 @@ export function SettingsPage() {
   }, [refresh]);
 
   const changeLevel = async (level: number) => {
-    await tauriBridge.setPrivacyLevel(level, ["acknowledged"]);
-    await refresh();
+    try {
+      await tauriBridge.setPrivacyLevel(level, ["acknowledged"]);
+      await refresh();
+    } catch (e) {
+      setError(String(e));
+    }
   };
 
   const toggleCloudConsent = async () => {
-    await tauriBridge.setCloudConsent(!cloudConsent);
-    await refresh();
+    try {
+      await tauriBridge.setCloudConsent(!cloudConsent);
+      await refresh();
+    } catch (e) {
+      setError(String(e));
+    }
   };
 
   const hasCloudProvider = providers.some((p) => !p.is_local);

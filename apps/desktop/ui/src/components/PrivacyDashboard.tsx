@@ -50,23 +50,35 @@ export function PrivacyDashboard() {
 
   const togglePause = async () => {
     if (!status) return;
-    if (status.observation_active) {
-      await tauriBridge.pauseObservation();
-    } else {
-      await tauriBridge.resumeObservation();
+    try {
+      if (status.observation_active) {
+        await tauriBridge.pauseObservation();
+      } else {
+        await tauriBridge.resumeObservation();
+      }
+      await refresh();
+    } catch (e) {
+      setError(String(e));
     }
-    await refresh();
   };
 
   const confirmDeleteAll = async () => {
-    await tauriBridge.deleteAllData();
-    setConfirmingDelete(false);
-    await refresh();
+    try {
+      await tauriBridge.deleteAllData();
+      setConfirmingDelete(false);
+      await refresh();
+    } catch (e) {
+      setError(String(e));
+    }
   };
 
   const acknowledgeManifest = async () => {
-    await tauriBridge.acknowledgePrivacyManifest();
-    await refresh();
+    try {
+      await tauriBridge.acknowledgePrivacyManifest();
+      await refresh();
+    } catch (e) {
+      setError(String(e));
+    }
   };
 
   return (

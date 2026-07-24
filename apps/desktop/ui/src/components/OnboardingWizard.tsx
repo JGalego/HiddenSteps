@@ -51,6 +51,7 @@ export function OnboardingWizard({ onComplete }: { onComplete: () => void }) {
   });
   const [consented, setConsented] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
 
   const isLocal = providerType === "ollama";
   const detectedModels = runtimes?.find((r) => r.name === providerType)?.models ?? [];
@@ -86,32 +87,49 @@ export function OnboardingWizard({ onComplete }: { onComplete: () => void }) {
   const back = () => setStep((s) => Math.max(1, s - 1));
 
   const runValidation = async () => {
-    const result = await tauriBridge.testProviderConnectivity({
-      provider_type: providerType,
-      model: selectedModel,
-      api_key: apiKey || undefined,
-    });
-    setValidation({ checked: true, ok: result.ok, error: result.error });
+    try {
+      const result = await tauriBridge.testProviderConnectivity({
+        provider_type: providerType,
+        model: selectedModel,
+        api_key: apiKey || undefined,
+      });
+      setValidation({ checked: true, ok: result.ok, error: result.error });
+    } catch (e) {
+      // Without this, an IPC-level failure (as opposed to a normal "the
+      // provider didn't respond" result) left `validation.checked` false
+      // forever — no error shown, and the click looked like it did nothing.
+      setValidation({ checked: true, ok: false, error: String(e) });
+    }
   };
 
   const startObserving = async () => {
     setStarting(true);
-    // Real bug this fixed: onboarding used to finish without ever calling
-    // set_ai_provider, so the provider/model the user just picked and
-    // validated was never actually persisted — Settings would show "No
-    // provider configured yet." immediately after finishing onboarding.
-    await tauriBridge.setAiProvider({
-      id: providerType,
-      provider_type: providerType,
-      is_local: isLocal,
-      model_name: selectedModel,
-      api_key: apiKey || undefined,
-    });
-    await tauriBridge.setPrivacyLevel(privacyLevel, ["acknowledged"]);
-    await tauriBridge.completeOnboarding();
-    setStarting(false);
-    next(); // to the confirmation screen
-    onComplete();
+    setStartError(null);
+    try {
+      // Real bug this fixed: onboarding used to finish without ever calling
+      // set_ai_provider, so the provider/model the user just picked and
+      // validated was never actually persisted — Settings would show "No
+      // provider configured yet." immediately after finishing onboarding.
+      await tauriBridge.setAiProvider({
+        id: providerType,
+        provider_type: providerType,
+        is_local: isLocal,
+        model_name: selectedModel,
+        api_key: apiKey || undefined,
+      });
+      await tauriBridge.setPrivacyLevel(privacyLevel, ["acknowledged"]);
+      await tauriBridge.completeOnboarding();
+      next(); // to the confirmation screen
+      onComplete();
+    } catch (e) {
+      // Without this, a rejection from any of the three calls above left
+      // `starting` stuck true forever (the button disabled, per its
+      // `disabled={!consented || starting}` below) with nothing telling the
+      // user anything had gone wrong at all.
+      setStartError(String(e));
+    } finally {
+      setStarting(false);
+    }
   };
 
   return (
@@ -335,6 +353,11 @@ export function OnboardingWizard({ onComplete }: { onComplete: () => void }) {
             />
             I understand what HiddenSteps will observe and consent to start.
           </label>
+          {startError && (
+            <p className="alert" role="alert">
+              {startError}
+            </p>
+          )}
           <div className="btn-row">
             <button className="btn" type="button" onClick={back}>
               Back

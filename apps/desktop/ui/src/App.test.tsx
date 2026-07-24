@@ -9,6 +9,8 @@ vi.mock("./tauriBridge", () => ({
     getOnboardingState: vi.fn(),
     listRecommendations: vi.fn(),
     getObservationStatus: vi.fn(),
+    getPrivacyManifestStatus: vi.fn(),
+    acknowledgePrivacyManifest: vi.fn(),
     getRecentEvents: vi.fn(),
     listLlmProviders: vi.fn(),
     getDiagnostics: vi.fn(),
@@ -26,6 +28,11 @@ describe("App", () => {
       consented_manifest_version: 1,
       observation_active: true,
       updated_at: "2026-07-16T00:00:00Z",
+    });
+    mockedBridge.getPrivacyManifestStatus.mockResolvedValue({
+      current_manifest_version: 1,
+      consented_manifest_version: 1,
+      reconsent_required: false,
     });
     mockedBridge.getRecentEvents.mockResolvedValue([]);
     mockedBridge.listLlmProviders.mockResolvedValue([]);
@@ -53,6 +60,22 @@ describe("App", () => {
     render(<App />);
     expect(await screen.findByRole("navigation")).toBeInTheDocument();
     expect(screen.getByLabelText("Privacy Dashboard")).toBeInTheDocument();
+  });
+
+  it("shows a retry option instead of an infinite loading spinner when the onboarding check fails", async () => {
+    // Regression test: getOnboardingState rejecting used to leave
+    // onboardingComplete stuck at null forever, with no error and no way
+    // out of the "Loading…" screen.
+    const user = userEvent.setup();
+    mockedBridge.getOnboardingState.mockRejectedValueOnce(new Error("IPC unavailable"));
+    render(<App />);
+
+    const retryButton = await screen.findByRole("button", { name: "Retry" });
+    expect(screen.getByRole("alert")).toHaveTextContent("IPC unavailable");
+
+    mockedBridge.getOnboardingState.mockResolvedValueOnce({ completed: true });
+    await user.click(retryButton);
+    expect(await screen.findByRole("navigation")).toBeInTheDocument();
   });
 
   it("switching tabs never re-triggers onboarding", async () => {

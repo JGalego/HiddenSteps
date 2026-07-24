@@ -23,19 +23,35 @@ export function RecommendationCard({
   onStatusChange?: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const markImplemented = async () => {
-    await tauriBridge.setRecommendationStatus(recommendation.id!, "implemented");
-    onStatusChange?.();
+    try {
+      await tauriBridge.setRecommendationStatus(recommendation.id!, "implemented");
+      setError(null);
+      onStatusChange?.();
+    } catch (e) {
+      setError(String(e));
+    }
   };
 
   const dismiss = async (reason: string) => {
-    await tauriBridge.setRecommendationStatus(recommendation.id!, "dismissed", reason);
-    onStatusChange?.();
+    try {
+      await tauriBridge.setRecommendationStatus(recommendation.id!, "dismissed", reason);
+      setError(null);
+      onStatusChange?.();
+    } catch (e) {
+      setError(String(e));
+    }
   };
 
   return (
     <article className="recommendation-card" aria-label={recommendation.title}>
+      {error && (
+        <p className="alert" role="alert">
+          {error}
+        </p>
+      )}
       <h3>{recommendation.title}</h3>
       <p className="recommendation-meta">
         Estimated time saved:{" "}

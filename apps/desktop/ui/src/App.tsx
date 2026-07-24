@@ -18,15 +18,35 @@ type Tab = "dashboard" | "recommendations" | "settings" | "diagnostics";
  */
 export function App() {
   const [onboardingComplete, setOnboardingComplete] = useState<boolean | null>(null);
+  const [onboardingError, setOnboardingError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("dashboard");
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
+  const [recommendationsError, setRecommendationsError] = useState<string | null>(null);
 
-  useEffect(() => {
-    tauriBridge.getOnboardingState().then((state) => setOnboardingComplete(state.completed));
+  const checkOnboardingState = useCallback(() => {
+    setOnboardingError(null);
+    tauriBridge
+      .getOnboardingState()
+      .then((state) => setOnboardingComplete(state.completed))
+      .catch((e) => {
+        // Without this, a rejected first IPC call left onboardingComplete
+        // stuck at null forever — the whole app frozen on the loading
+        // spinner below with no way out.
+        setOnboardingError(String(e));
+      });
   }, []);
 
+  useEffect(() => {
+    checkOnboardingState();
+  }, [checkOnboardingState]);
+
   const refreshRecommendations = useCallback(async () => {
-    setRecommendations(await tauriBridge.listRecommendations());
+    try {
+      setRecommendations(await tauriBridge.listRecommendations());
+      setRecommendationsError(null);
+    } catch (e) {
+      setRecommendationsError(String(e));
+    }
   }, []);
 
   useEffect(() => {
@@ -34,6 +54,19 @@ export function App() {
       refreshRecommendations();
     }
   }, [onboardingComplete, refreshRecommendations]);
+
+  if (onboardingError) {
+    return (
+      <div className="app-loading">
+        <p className="alert" role="alert">
+          {onboardingError}
+        </p>
+        <button className="btn" type="button" onClick={checkOnboardingState}>
+          Retry
+        </button>
+      </div>
+    );
+  }
 
   if (onboardingComplete === null) {
     return <p className="app-loading">Loading…</p>;
@@ -63,6 +96,11 @@ export function App() {
       {tab === "recommendations" && (
         <section aria-label="Recommendations">
           <h1>Recommendations</h1>
+          {recommendationsError && (
+            <p className="alert" role="alert">
+              {recommendationsError}
+            </p>
+          )}
           {recommendations.length === 0 && (
             <p>Still learning your patterns. Nothing has repeated often enough yet to suggest a change.</p>
           )}

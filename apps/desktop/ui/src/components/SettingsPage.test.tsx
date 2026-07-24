@@ -99,4 +99,14 @@ describe("SettingsPage", () => {
     await user.click(checkbox);
     expect(mockedBridge.setCloudConsent).toHaveBeenCalledWith(true);
   });
+
+  it("shows an error rather than silently failing when changing the level fails", async () => {
+    const user = userEvent.setup();
+    mockedBridge.setPrivacyLevel.mockRejectedValueOnce(new Error("policy floor violation"));
+    render(<SettingsPage />);
+    await screen.findByText("2");
+
+    await user.click(screen.getByRole("button", { name: "Raise" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("policy floor violation");
+  });
 });

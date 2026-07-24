@@ -173,6 +173,39 @@ describe("OnboardingWizard", () => {
     expect(await screen.findByText("✓ HiddenSteps is now observing")).toBeInTheDocument();
   });
 
+  it("shows an error and stays clickable when starting observation fails", async () => {
+    // Regression test: a rejection from any of the three calls startObserving
+    // makes used to leave `starting` stuck true forever — the button
+    // permanently disabled, with no error message telling the user anything
+    // had gone wrong.
+    const user = userEvent.setup();
+    mockedBridge.setAiProvider.mockRejectedValueOnce(new Error("vault write failed"));
+    render(<OnboardingWizard onComplete={vi.fn()} />);
+
+    await advanceThroughValidation(user);
+    await user.click(screen.getByRole("checkbox"));
+    await user.click(screen.getByRole("button", { name: "Start observing" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("vault write failed");
+    const startButton = await screen.findByRole("button", { name: "Start observing" });
+    expect(startButton).toBeEnabled();
+  });
+
+  it("shows a validation error when the connectivity check itself rejects", async () => {
+    // Regression test: an IPC-level rejection (not a normal ok:false result)
+    // from test_provider_connectivity used to leave validation.checked false
+    // forever, with the click looking like it did nothing at all.
+    const user = userEvent.setup();
+    mockedBridge.testProviderConnectivity.mockRejectedValueOnce(new Error("connection refused"));
+    render(<OnboardingWizard onComplete={vi.fn()} />);
+
+    await advanceToStep(user, 6);
+    await user.click(screen.getByRole("button", { name: "Run checks" }));
+
+    const result = await screen.findByTestId("validation-result");
+    expect(result).toHaveTextContent("connection refused");
+  });
+
   it("selecting a privacy level on step 4 is reflected in the step 7 summary", async () => {
     const user = userEvent.setup();
     render(<OnboardingWizard onComplete={vi.fn()} />);

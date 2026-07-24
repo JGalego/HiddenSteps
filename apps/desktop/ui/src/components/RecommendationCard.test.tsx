@@ -88,4 +88,14 @@ describe("RecommendationCard", () => {
       "not worth the effort"
     );
   });
+
+  it("shows an error rather than silently failing when marking implemented fails", async () => {
+    const user = userEvent.setup();
+    mockedBridge.setRecommendationStatus.mockRejectedValueOnce(new Error("store unavailable"));
+    render(<RecommendationCard recommendation={sample} />);
+
+    await user.click(screen.getByRole("button", { name: "Mark implemented" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("store unavailable");
+  });
 });

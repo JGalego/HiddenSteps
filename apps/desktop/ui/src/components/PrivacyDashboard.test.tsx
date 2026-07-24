@@ -126,6 +126,17 @@ describe("PrivacyDashboard", () => {
     expect(screen.queryByTestId("reconsent-banner")).not.toBeInTheDocument();
   });
 
+  it("shows an error rather than silently failing when pausing fails", async () => {
+    const user = userEvent.setup();
+    mockedBridge.pauseObservation.mockRejectedValueOnce(new Error("store locked"));
+    render(<PrivacyDashboard />);
+
+    const pauseButton = await screen.findByRole("button", { name: "Pause" });
+    await user.click(pauseButton);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("store locked");
+  });
+
   it("cancelling the delete confirmation never calls delete_all_data", async () => {
     const user = userEvent.setup();
     render(<PrivacyDashboard />);
