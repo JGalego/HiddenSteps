@@ -1,4 +1,33 @@
+use std::time::Duration;
+
 use async_trait::async_trait;
+
+/// Default per-request timeout for every real `LlmProvider`'s HTTP client.
+/// `reqwest::Client::new()` has no timeout at all by default — a hung remote
+/// (a stuck local model, a cloud outage) would block a completion/embedding
+/// call forever. 120 seconds is generous enough for a slow local model (a
+/// real `qwen3` hybrid-reasoning model took over two minutes with `think`
+/// left at its default before that was fixed — see `CompletionRequest::think`
+/// below) while still guaranteeing every call eventually returns.
+pub(crate) const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// Builds the `reqwest::Client` every real provider (`OllamaProvider`,
+/// `OpenAiCompatibleProvider`, `AnthropicProvider`) uses, so the timeout above
+/// is applied in exactly one place rather than duplicated at each call site.
+pub(crate) fn build_http_client() -> reqwest::Client {
+    build_http_client_with_timeout(DEFAULT_REQUEST_TIMEOUT)
+}
+
+/// The general form `build_http_client` calls with the production default —
+/// exists separately so a test can use a millisecond-scale timeout and prove
+/// the client actually enforces one, rather than waiting out
+/// `DEFAULT_REQUEST_TIMEOUT` (2 minutes) to find out.
+pub(crate) fn build_http_client_with_timeout(timeout: Duration) -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(timeout)
+        .build()
+        .expect("building a reqwest client with only a timeout configured should never fail")
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProviderError {
@@ -133,5 +162,26 @@ mod tests {
             .unwrap();
         assert_eq!(response.text, "ok");
         assert_eq!(boxed.embed("hi").await.unwrap(), vec![0.1]);
+    }
+
+    #[tokio::test]
+    async fn build_http_client_with_timeout_actually_times_out_on_a_slow_response() {
+        // Proves the timeout is really wired in, not just configured and
+        // silently ignored — every real provider's client would otherwise
+        // wait forever on a hung remote.
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .set_delay(std::time::Duration::from_millis(300)),
+            )
+            .mount(&server)
+            .await;
+
+        let client = build_http_client_with_timeout(Duration::from_millis(50));
+        let result = client.get(server.uri()).send().await;
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().is_timeout());
     }
 }

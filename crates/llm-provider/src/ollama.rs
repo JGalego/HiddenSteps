@@ -20,7 +20,7 @@ impl OllamaProvider {
         Self {
             base_url: base_url.into(),
             model: model.into(),
-            client: reqwest::Client::new(),
+            client: crate::provider::build_http_client(),
         }
     }
 

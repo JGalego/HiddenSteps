@@ -30,7 +30,7 @@ impl AnthropicProvider {
             base_url: base_url.into(),
             api_key: api_key.into(),
             model: model.into(),
-            client: reqwest::Client::new(),
+            client: crate::provider::build_http_client(),
         }
     }
 

@@ -32,7 +32,7 @@ impl OpenAiCompatibleProvider {
             api_key: api_key.into(),
             model: model.into(),
             embedding_model,
-            client: reqwest::Client::new(),
+            client: crate::provider::build_http_client(),
         }
     }
 
