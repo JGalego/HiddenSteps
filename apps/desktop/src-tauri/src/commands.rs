@@ -491,7 +491,7 @@ pub async fn delete_all_data(state: State<'_, AppState>) -> Result<bool, String>
     state.store.rekey(&new_key).map_err(to_err)?;
     let secret_store = hiddensteps_security::KeyringSecretStore::new(crate::VAULT_SERVICE);
     secret_store
-        .set(crate::MASTER_KEY_ENTRY, &new_key)
+        .set(crate::MASTER_KEY_ENTRY, &*new_key)
         .map_err(to_err)?;
     Ok(true)
 }

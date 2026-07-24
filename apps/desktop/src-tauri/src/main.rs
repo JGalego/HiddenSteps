@@ -14,6 +14,7 @@ use hiddensteps_privacy_engine::DispatchGate;
 use hiddensteps_security::{generate_master_key, KeyringSecretStore, SecretStore};
 use tauri::Manager;
 use tokio::sync::Mutex;
+use zeroize::Zeroizing;
 
 const VAULT_SERVICE: &str = "com.hiddensteps.app";
 const MASTER_KEY_ENTRY: &str = "db-master-key";
@@ -25,10 +26,10 @@ const MASTER_KEY_ENTRY: &str = "db-master-key";
 /// flow this `main` doesn't implement; wiring the onboarding choice between the
 /// two is UI/first-run-flow work layered on top of this function, not part of
 /// it.
-fn resolve_master_key(secret_store: &KeyringSecretStore) -> [u8; 32] {
+fn resolve_master_key(secret_store: &KeyringSecretStore) -> Zeroizing<[u8; 32]> {
     if let Ok(Some(existing)) = secret_store.get(MASTER_KEY_ENTRY) {
         if existing.len() == 32 {
-            let mut key = [0u8; 32];
+            let mut key = Zeroizing::new([0u8; 32]);
             key.copy_from_slice(&existing);
             return key;
         }
@@ -39,7 +40,7 @@ fn resolve_master_key(secret_store: &KeyringSecretStore) -> [u8; 32] {
     // real UX handling of a vault failure (surfacing
     // `security::key_or_vault_error`) belongs in the setup step below, once an
     // `AppHandle` exists to emit on.
-    let _ = secret_store.set(MASTER_KEY_ENTRY, &key);
+    let _ = secret_store.set(MASTER_KEY_ENTRY, &*key);
     key
 }
 
@@ -126,6 +127,10 @@ fn main() {
         SqlCipherEventStore::open(&data_dir(), &master_key)
             .expect("failed to open the encrypted HiddenSteps store"),
     );
+    // The key has been applied to the open connection's PRAGMA; drop our copy
+    // (wiping it, since it's `Zeroizing`) rather than holding it for the
+    // process's whole lifetime.
+    drop(master_key);
 
     // Consent granted through `commands::set_cloud_consent` is persisted as a
     // setting (there being no dedicated schema for it — see `state::AppState`'s

@@ -11,6 +11,7 @@ keyring = "3"
 rand = "0.8"
 argon2 = "0.5"
 base64 = "0.22"
+zeroize = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
 tempfile = "3"

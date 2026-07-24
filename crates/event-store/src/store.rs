@@ -8,6 +8,7 @@ use hiddensteps_domain::{
 };
 use rusqlite::{params, Connection, OptionalExtension};
 use time::OffsetDateTime;
+use zeroize::Zeroizing;
 
 use crate::time_fmt::{from_rfc3339, to_rfc3339};
 use crate::EventStoreError;
@@ -350,7 +351,11 @@ impl SqlCipherEventStore {
     /// the freed/vacuumed pages of a surviving on-disk or backup copy.
     pub fn rekey(&self, new_key: &[u8; 32]) -> Result<(), EventStoreError> {
         let conn = self.conn.lock().expect("event store mutex poisoned");
-        conn.execute_batch(&format!("PRAGMA rekey = \"x'{}'\";", to_hex(new_key)))?;
+        let pragma = Zeroizing::new(format!(
+            "PRAGMA rekey = \"x'{}'\";",
+            to_hex(new_key).as_str()
+        ));
+        conn.execute_batch(&pragma)?;
         verify_key(&conn)?;
         Ok(())
     }
@@ -748,7 +753,11 @@ impl SqlCipherEventStore {
 }
 
 fn apply_key(conn: &Connection, key: &[u8; 32]) -> Result<(), EventStoreError> {
-    conn.execute_batch(&format!("PRAGMA key = \"x'{}'\";", to_hex(key)))?;
+    // The PRAGMA text embeds the key in hex and is therefore as sensitive as
+    // the key itself — held in `Zeroizing` so it's wiped after use rather than
+    // left in a freed `String`'s buffer.
+    let pragma = Zeroizing::new(format!("PRAGMA key = \"x'{}'\";", to_hex(key).as_str()));
+    conn.execute_batch(&pragma)?;
     Ok(())
 }
 
@@ -764,8 +773,8 @@ fn verify_key(conn: &Connection) -> Result<(), EventStoreError> {
     .map_err(|_| EventStoreError::InvalidKeyOrCorruptFile)
 }
 
-fn to_hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+fn to_hex(bytes: &[u8]) -> Zeroizing<String> {
+    Zeroizing::new(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
 fn signal_type_to_str(signal_type: SignalType) -> &'static str {

@@ -1,11 +1,18 @@
 use argon2::{Algorithm, Argon2, Params, Version};
 use rand::RngCore;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// A key derived from a user-supplied passphrase, plus the salt needed to re-derive
 /// it later. Used only by Portable Mode (ADR-0008) — every other deployment mode
 /// uses `generate_master_key` + the OS credential vault instead.
+///
+/// `key` is wiped from memory when this drops (`ZeroizeOnDrop`); `salt` is not
+/// secret (it's stored in plaintext alongside the encrypted data by design)
+/// and is skipped, so re-deriving the key later still works.
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct PassphraseKey {
     pub key: [u8; 32],
+    #[zeroize(skip)]
     pub salt: [u8; 16],
 }
 
