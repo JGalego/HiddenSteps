@@ -7,4 +7,4 @@ mod host;
 mod manifest;
 
 pub use host::{CallLog, HostError, PluginHost, PluginInstance};
-pub use manifest::{Capability, ManifestError, PluginManifest};
+pub use manifest::{Capability, ManifestError, PluginManifest, PluginType};

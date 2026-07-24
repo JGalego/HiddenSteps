@@ -28,12 +28,30 @@ impl Capability {
     }
 }
 
+/// The kind of extension point a plugin plugs into — a **closed enumeration**,
+/// like `Capability`, so a manifest declaring `"plugin_type": "totally_made_up"`
+/// fails to parse rather than parsing into a free-form string that every
+/// downstream `match` then has to defensively handle. These mirror the plugin
+/// types named in `docs/design/08-plugin-architecture.md` §1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginType {
+    ObservationSource,
+    LlmProvider,
+    EmbeddingProvider,
+    AutomationProvider,
+    RecommendationEngine,
+    PatternDetector,
+    PolicyLoader,
+    Integration,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginManifest {
     pub id: String,
     pub name: String,
     pub version: String,
-    pub plugin_type: String,
+    pub plugin_type: PluginType,
     pub min_privacy_level: u8,
     pub capabilities: Vec<Capability>,
 }
@@ -98,12 +116,25 @@ mod tests {
     }
 
     #[test]
+    fn rejects_an_unknown_plugin_type_at_parse_time() {
+        // plugin_type is a closed enum, like capabilities — a made-up type
+        // must fail to parse rather than becoming a free-form string every
+        // downstream match then has to handle defensively.
+        let json = r#"{
+            "id": "com.example.plugin", "name": "Example", "version": "1.0.0",
+            "plugin_type": "totally_made_up_type", "min_privacy_level": 2,
+            "capabilities": []
+        }"#;
+        assert!(PluginManifest::parse(json).is_err());
+    }
+
+    #[test]
     fn screenshot_capability_below_level_four_fails_validation() {
         let manifest = PluginManifest {
             id: "com.example.screen-reader".to_string(),
             name: "Screen Reader".to_string(),
             version: "1.0.0".to_string(),
-            plugin_type: "observation_source".to_string(),
+            plugin_type: PluginType::ObservationSource,
             min_privacy_level: 2,
             capabilities: vec![Capability::ObserveScreenshot],
         };
@@ -122,7 +153,7 @@ mod tests {
             id: "com.example.screen-reader".to_string(),
             name: "Screen Reader".to_string(),
             version: "1.0.0".to_string(),
-            plugin_type: "observation_source".to_string(),
+            plugin_type: PluginType::ObservationSource,
             min_privacy_level: 4,
             capabilities: vec![Capability::ObserveScreenshot],
         };

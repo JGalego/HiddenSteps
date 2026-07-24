@@ -50,6 +50,19 @@ impl EnterprisePolicy {
     /// the JSON produces a policy that parses successfully and behaves exactly
     /// as if those keys weren't there, because nothing in this type has anywhere
     /// to put that data.
+    ///
+    /// **No signature/integrity check.** This trusts the JSON content as-is;
+    /// there is deliberately no tamper detection here, unlike `hiddensteps-
+    /// plugin-host`'s manifest where signature verification is called out as a
+    /// separate later step. This is safe *only because* a policy's two knobs
+    /// can only ever make the product **more** restrictive (raise the privacy
+    /// floor, narrow the provider allowlist — see `effective_privacy_level`/
+    /// `is_provider_allowed`), never less: an attacker who can write the policy
+    /// file could set `privacy_level_floor: 0` and clear the allowlist, but
+    /// that only returns the device to its unconstrained default — it cannot
+    /// weaken any hard rule enforced elsewhere (the Level-4-never-cloud gate,
+    /// redaction, deletion). Any future field that could *relax* a default
+    /// would need signing added before it; that's why the schema stays closed.
     pub fn parse(json: &str) -> Result<Self, PolicyError> {
         let policy: EnterprisePolicy = serde_json::from_str(json)?;
         if let Some(floor) = policy.privacy_level_floor {
