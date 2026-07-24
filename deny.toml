@@ -17,7 +17,7 @@ ignore = []
 # "deny" because a brand-new transitive duplicate shouldn't hard-fail an
 # unrelated PR; it stays visible on every run.
 multiple-versions = "warn"
-wildcard-dependencies = "deny"
+wildcards = "deny"
 
 [licenses]
 # Not enforced in the `check advisories bans` CI invocation, but recorded here
