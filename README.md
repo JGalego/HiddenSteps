@@ -87,7 +87,7 @@ cargo test -p hiddensteps-llm-provider -- --ignored
 ### 2. The desktop app
 
 ```sh
-cd apps/desktop/ui && npm install && npm test   # 46 tests, real jsdom rendering
+cd apps/desktop/ui && npm install && npm test   # 50 tests, real jsdom rendering
 ```
 
 The native shell needs [Tauri's platform prerequisites](https://tauri.app/start/prerequisites/) (on Linux: `webkit2gtk-4.1` and friends via your package manager) — verified building on all three OSes in [CI](.github/workflows/ci.yml):
