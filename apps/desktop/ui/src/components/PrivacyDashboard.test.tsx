@@ -7,6 +7,8 @@ import { tauriBridge } from "../tauriBridge";
 vi.mock("../tauriBridge", () => ({
   tauriBridge: {
     getObservationStatus: vi.fn(),
+    getPrivacyManifestStatus: vi.fn(),
+    acknowledgePrivacyManifest: vi.fn(),
     getRecentEvents: vi.fn(),
     pauseObservation: vi.fn(),
     resumeObservation: vi.fn(),
@@ -24,6 +26,11 @@ describe("PrivacyDashboard", () => {
       consented_manifest_version: 1,
       observation_active: true,
       updated_at: "2026-07-16T00:00:00Z",
+    });
+    mockedBridge.getPrivacyManifestStatus.mockResolvedValue({
+      current_manifest_version: 1,
+      consented_manifest_version: 1,
+      reconsent_required: false,
     });
     mockedBridge.getRecentEvents.mockResolvedValue([
       {
@@ -92,6 +99,31 @@ describe("PrivacyDashboard", () => {
 
     await user.click(screen.getByRole("button", { name: "Delete everything" }));
     expect(mockedBridge.deleteAllData).toHaveBeenCalledOnce();
+  });
+
+  it("shows a reconsent banner and acknowledging it calls acknowledge_privacy_manifest", async () => {
+    const user = userEvent.setup();
+    mockedBridge.getPrivacyManifestStatus.mockResolvedValue({
+      current_manifest_version: 2,
+      consented_manifest_version: 1,
+      reconsent_required: true,
+    });
+    mockedBridge.acknowledgePrivacyManifest.mockResolvedValue(true);
+    render(<PrivacyDashboard />);
+
+    const banner = await screen.findByTestId("reconsent-banner");
+    expect(banner).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", { name: "Review and continue observing" })
+    );
+    expect(mockedBridge.acknowledgePrivacyManifest).toHaveBeenCalledOnce();
+  });
+
+  it("does not show a reconsent banner when no reconsent is required", async () => {
+    render(<PrivacyDashboard />);
+    await screen.findByTestId("status-line");
+    expect(screen.queryByTestId("reconsent-banner")).not.toBeInTheDocument();
   });
 
   it("cancelling the delete confirmation never calls delete_all_data", async () => {

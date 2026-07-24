@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { tauriBridge, type EventSummary, type PrivacyState } from "../tauriBridge";
+import {
+  tauriBridge,
+  type EventSummary,
+  type PrivacyManifestStatus,
+  type PrivacyState,
+} from "../tauriBridge";
 
 const LEVEL_LABELS: Record<number, string> = {
   0: "Manual",
@@ -18,17 +23,20 @@ const LEVEL_LABELS: Record<number, string> = {
  */
 export function PrivacyDashboard() {
   const [status, setStatus] = useState<PrivacyState | null>(null);
+  const [manifestStatus, setManifestStatus] = useState<PrivacyManifestStatus | null>(null);
   const [events, setEvents] = useState<EventSummary[]>([]);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
-      const [nextStatus, nextEvents] = await Promise.all([
+      const [nextStatus, nextManifestStatus, nextEvents] = await Promise.all([
         tauriBridge.getObservationStatus(),
+        tauriBridge.getPrivacyManifestStatus(),
         tauriBridge.getRecentEvents(20),
       ]);
       setStatus(nextStatus);
+      setManifestStatus(nextManifestStatus);
       setEvents(nextEvents);
       setError(null);
     } catch (e) {
@@ -56,6 +64,11 @@ export function PrivacyDashboard() {
     await refresh();
   };
 
+  const acknowledgeManifest = async () => {
+    await tauriBridge.acknowledgePrivacyManifest();
+    await refresh();
+  };
+
   return (
     <section aria-label="Privacy Dashboard">
       <h1>Privacy Dashboard</h1>
@@ -64,6 +77,19 @@ export function PrivacyDashboard() {
         <p className="alert" role="alert">
           {error}
         </p>
+      )}
+
+      {manifestStatus?.reconsent_required && (
+        <div className="alert card" role="alert" data-testid="reconsent-banner">
+          <p>
+            What HiddenSteps captures at your privacy level has changed since
+            you last agreed to it. Observation is paused until you review and
+            accept the update.
+          </p>
+          <button className="btn" type="button" onClick={acknowledgeManifest}>
+            Review and continue observing
+          </button>
+        </div>
       )}
 
       {status && (

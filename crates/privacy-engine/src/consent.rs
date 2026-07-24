@@ -1,3 +1,11 @@
+/// The privacy manifest version this build of HiddenSteps ships with, per
+/// `docs/design/05-privacy-model.md` §5. Bump this whenever a release changes
+/// what any privacy level captures — `requires_reconsent` below is what
+/// actually gates observation on a user re-consenting once this changes; a
+/// bump with no caller checking it would be exactly as inert as this
+/// constant's absence was before.
+pub const CURRENT_MANIFEST_VERSION: i64 = 1;
+
 /// Per `docs/design/05-privacy-model.md` §5: each privacy level's signal manifest
 /// is versioned. If a future release changes what a level captures, the affected
 /// level's manifest version increases, and any user currently on that level must

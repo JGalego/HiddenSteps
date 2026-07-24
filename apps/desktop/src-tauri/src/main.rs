@@ -183,6 +183,8 @@ fn main() {
             commands::set_privacy_level,
             commands::complete_onboarding,
             commands::get_observation_status,
+            commands::get_privacy_manifest_status,
+            commands::acknowledge_privacy_manifest,
             commands::pause_observation,
             commands::resume_observation,
             commands::get_recent_events,

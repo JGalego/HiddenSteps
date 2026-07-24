@@ -21,6 +21,6 @@ mod consent;
 mod gate;
 mod gated_provider;
 
-pub use consent::requires_reconsent;
+pub use consent::{requires_reconsent, CURRENT_MANIFEST_VERSION};
 pub use gate::{cloud_eligibility, CloudEligibility, DispatchDecision, DispatchGate};
 pub use gated_provider::{GateError, PrivacyGatedProvider};

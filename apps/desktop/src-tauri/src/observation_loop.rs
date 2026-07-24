@@ -39,7 +39,20 @@ pub async fn run(app: AppHandle, store: Arc<SqlCipherEventStore>) {
             Ok(state) => state,
             Err(_) => break,
         };
-        if !privacy_state.observation_active || privacy_state.current_level == PrivacyLevel::Manual
+        // requires_reconsent gates observation the same way observation_active
+        // does: consented_manifest_version was persisted since v0.1.0, but
+        // nothing ever compared it against the current build's manifest
+        // version, so a future manifest bump (a release that changes what a
+        // level captures) would never actually pause observation until the
+        // user re-consents — it would just keep observing under the old,
+        // superseded consent.
+        let reconsent_required = hiddensteps_privacy_engine::requires_reconsent(
+            privacy_state.consented_manifest_version,
+            hiddensteps_privacy_engine::CURRENT_MANIFEST_VERSION,
+        );
+        if !privacy_state.observation_active
+            || privacy_state.current_level == PrivacyLevel::Manual
+            || reconsent_required
         {
             tokio::time::sleep(Duration::from_secs(2)).await;
             continue;

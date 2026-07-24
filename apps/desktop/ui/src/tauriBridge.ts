@@ -85,6 +85,12 @@ export interface Diagnostics {
   encryption_status: string;
 }
 
+export interface PrivacyManifestStatus {
+  current_manifest_version: number;
+  consented_manifest_version: number;
+  reconsent_required: boolean;
+}
+
 export interface AuditEntry {
   id: number | null;
   occurred_at: string;
@@ -134,6 +140,11 @@ export const tauriBridge = {
   getAuditLog: (limit: number): Promise<AuditEntry[]> => invoke("get_audit_log", { limit }),
 
   getObservationStatus: (): Promise<PrivacyState> => invoke("get_observation_status"),
+
+  getPrivacyManifestStatus: (): Promise<PrivacyManifestStatus> =>
+    invoke("get_privacy_manifest_status"),
+
+  acknowledgePrivacyManifest: (): Promise<boolean> => invoke("acknowledge_privacy_manifest"),
 
   pauseObservation: (): Promise<boolean> => invoke("pause_observation"),
 

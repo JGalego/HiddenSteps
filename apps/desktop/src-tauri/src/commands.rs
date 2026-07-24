@@ -314,6 +314,55 @@ pub async fn get_observation_status(state: State<'_, AppState>) -> Result<Privac
     state.store.get_privacy_state().map_err(to_err)
 }
 
+#[derive(Serialize)]
+pub struct PrivacyManifestStatus {
+    pub current_manifest_version: i64,
+    pub consented_manifest_version: i64,
+    pub reconsent_required: bool,
+}
+
+/// Whether the user needs to re-consent before observation resumes — per
+/// `docs/design/05-privacy-model.md` §5, required whenever a release has
+/// changed what a privacy level captures since the user last consented.
+/// `observation_loop` independently enforces this (it won't observe while
+/// this is true); this command is how the UI surfaces *why* observation
+/// might be paused instead of it looking indistinguishable from a plain
+/// user-initiated pause.
+#[tauri::command]
+pub async fn get_privacy_manifest_status(
+    state: State<'_, AppState>,
+) -> Result<PrivacyManifestStatus, String> {
+    let privacy_state = state.store.get_privacy_state().map_err(to_err)?;
+    let current_manifest_version = hiddensteps_privacy_engine::CURRENT_MANIFEST_VERSION;
+    Ok(PrivacyManifestStatus {
+        current_manifest_version,
+        consented_manifest_version: privacy_state.consented_manifest_version,
+        reconsent_required: hiddensteps_privacy_engine::requires_reconsent(
+            privacy_state.consented_manifest_version,
+            current_manifest_version,
+        ),
+    })
+}
+
+/// Records that the user has seen and accepted whatever changed in the
+/// current privacy manifest version, letting `observation_loop` resume.
+#[tauri::command]
+pub async fn acknowledge_privacy_manifest(state: State<'_, AppState>) -> Result<bool, String> {
+    let mut current = state.store.get_privacy_state().map_err(to_err)?;
+    current.consented_manifest_version = hiddensteps_privacy_engine::CURRENT_MANIFEST_VERSION;
+    current.updated_at = OffsetDateTime::now_utc();
+    state.store.set_privacy_state(&current).map_err(to_err)?;
+    state
+        .store
+        .append_audit_entry(&AuditEntry::new(
+            AuditActor::User,
+            "privacy_manifest_reconsented",
+            serde_json::json!({ "version": hiddensteps_privacy_engine::CURRENT_MANIFEST_VERSION }),
+        ))
+        .map_err(to_err)?;
+    Ok(true)
+}
+
 #[tauri::command]
 pub async fn pause_observation(app: AppHandle, state: State<'_, AppState>) -> Result<bool, String> {
     let mut current = state.store.get_privacy_state().map_err(to_err)?;
