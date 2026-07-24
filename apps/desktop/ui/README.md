@@ -27,4 +27,4 @@ npm run build    # production build (used by `../src-tauri`'s beforeBuildCommand
 npm run dev      # dev server on :1420 (used by `../src-tauri`'s beforeDevCommand)
 ```
 
-All of the above were actually run in this repository's dev environment as part of building this UI — unlike `../src-tauri`, nothing here required a system dependency this sandbox lacked. Current count: 26 tests across 6 test files, all passing.
+All of the above were actually run in this repository's dev environment as part of building this UI — unlike `../src-tauri`, nothing here required a system dependency this sandbox lacked. Current count: 46 tests across 7 test files, all passing.

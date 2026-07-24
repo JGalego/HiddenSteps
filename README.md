@@ -10,7 +10,7 @@
   <a href="https://github.com/JGalego/HiddenSteps/actions/workflows/ci.yml"><img src="https://github.com/JGalego/HiddenSteps/actions/workflows/ci.yml/badge.svg" alt="CI status" /></a>
   <a href="https://github.com/JGalego/HiddenSteps/releases/latest"><img src="https://img.shields.io/github/v/release/JGalego/HiddenSteps?include_prereleases&label=release" alt="Latest release" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
-  <a href="crates/README.md"><img src="https://img.shields.io/badge/rust%20tests-148%20passing-brightgreen" alt="148 Rust tests passing" /></a>
+  <a href="crates/README.md"><img src="https://img.shields.io/badge/rust%20tests-193%20passing-brightgreen" alt="193 Rust tests passing" /></a>
 </p>
 
 ---
@@ -75,7 +75,7 @@ Prefer to build from source, or want to contribute? Two independent pieces:
 ```sh
 git clone https://github.com/JGalego/HiddenSteps.git
 cd HiddenSteps
-cargo test --workspace       # 148 tests, ~15s, no system dependencies beyond cargo itself
+cargo test --workspace       # 183 tests with no system dependencies beyond cargo (+10 in hiddensteps-observation that need a live X11 display)
 ```
 
 If you have [Ollama](https://ollama.com) running locally, you can also run the tests that hit a real model:
@@ -87,7 +87,7 @@ cargo test -p hiddensteps-llm-provider -- --ignored
 ### 2. The desktop app
 
 ```sh
-cd apps/desktop/ui && npm install && npm test   # 26 tests, real jsdom rendering
+cd apps/desktop/ui && npm install && npm test   # 46 tests, real jsdom rendering
 ```
 
 The native shell needs [Tauri's platform prerequisites](https://tauri.app/start/prerequisites/) (on Linux: `webkit2gtk-4.1` and friends via your package manager) — verified building on all three OSes in [CI](.github/workflows/ci.yml):
