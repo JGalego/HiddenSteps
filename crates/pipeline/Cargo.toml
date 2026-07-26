@@ -10,3 +10,26 @@ hiddensteps-domain = { path = "../domain" }
 hiddensteps-redaction = { path = "../redaction" }
 serde_json.workspace = true
 time.workspace = true
+thiserror.workspace = true
+# `OcrsTextExtractor` (src/ocr.rs): a real `TextExtractor` built on `ocrs`, a
+# pure-Rust OCR engine, and its `rten` ML runtime — no `cfg` gating needed
+# anywhere in this crate for it, since both are pure Rust and build the same
+# way on every OS in `.github/workflows/ci.yml`'s `core` matrix. `rten`'s
+# feature must match what `ocrs` itself compiles against (`rten_format`, the
+# `.rten` model file format `ocrs`'s own published models use) so the `rten::
+# Model` this crate constructs is the same type `ocrs::OcrEngineParams` expects.
+ocrs = "0.12"
+rten = { version = "0.24", default-features = false, features = ["rten_format"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[dev-dependencies]
+# Only used by ocr::tests::recognizes_real_text (network-fetches the real OCR
+# models, so #[ignore]d) — not part of the default `cargo test` build's actual
+# work, just its compiled surface.
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+# Renders a known text string into a test image for the same test, using
+# whichever common system font it finds (see that test's doc comment) — real
+# text-recognition accuracy is otherwise untestable without either committing a
+# multi-megabyte font or an ambiguously-licensed fixture image.
+imageproc = "0.25"
+ab_glyph = "0.2"

@@ -2,6 +2,13 @@ import { useCallback, useEffect, useState } from "react";
 import { tauriBridge, type LlmProviderConfig, type PrivacyState } from "../tauriBridge";
 import { acknowledgedPermissionsFor } from "../privacyLevels";
 
+// The settings-table key `observation_loop`'s screenshot+OCR gate reads every
+// tick (`commands::DEEP_MODE_SCREENSHOT_OCR_SETTING_KEY` on the Rust side) —
+// kept in sync with that constant's literal value by hand, the same way this
+// file already has no compile-time link to any other Rust constant it calls
+// by string (e.g. `set_privacy_level`'s command name itself).
+const DEEP_MODE_SCREENSHOT_OCR_SETTING_KEY = "deep_mode_screenshot_ocr_enabled";
+
 /**
  * docs/ux/05-settings-and-complexity-tiers.md's Privacy/AI-Provider sections.
  * Per that doc's closing design rule: privacy level is never tier-gated, so
@@ -14,18 +21,22 @@ export function SettingsPage() {
   const [status, setStatus] = useState<PrivacyState | null>(null);
   const [providers, setProviders] = useState<LlmProviderConfig[]>([]);
   const [cloudConsent, setCloudConsentState] = useState(false);
+  const [deepModeScreenshotOcr, setDeepModeScreenshotOcr] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
-      const [nextStatus, nextProviders, nextCloudConsent] = await Promise.all([
-        tauriBridge.getObservationStatus(),
-        tauriBridge.listLlmProviders(),
-        tauriBridge.getCloudConsent(),
-      ]);
+      const [nextStatus, nextProviders, nextCloudConsent, nextDeepModeSetting] =
+        await Promise.all([
+          tauriBridge.getObservationStatus(),
+          tauriBridge.listLlmProviders(),
+          tauriBridge.getCloudConsent(),
+          tauriBridge.getSettings(DEEP_MODE_SCREENSHOT_OCR_SETTING_KEY),
+        ]);
       setStatus(nextStatus);
       setProviders(nextProviders);
       setCloudConsentState(nextCloudConsent);
+      setDeepModeScreenshotOcr(nextDeepModeSetting === true);
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -54,7 +65,20 @@ export function SettingsPage() {
     }
   };
 
+  const toggleDeepModeScreenshotOcr = async () => {
+    try {
+      await tauriBridge.updateSettings(
+        DEEP_MODE_SCREENSHOT_OCR_SETTING_KEY,
+        !deepModeScreenshotOcr
+      );
+      await refresh();
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
   const hasCloudProvider = providers.some((p) => !p.is_local);
+  const isMaximumAssistance = status?.current_level === 4;
 
   return (
     <section aria-label="Settings">
@@ -86,6 +110,20 @@ export function SettingsPage() {
                 Raise
               </button>
             </span>
+          </p>
+        )}
+        {isMaximumAssistance && (
+          <p className="deep-mode-screenshot-ocr-toggle">
+            <label>
+              <input
+                type="checkbox"
+                checked={deepModeScreenshotOcr}
+                onChange={toggleDeepModeScreenshotOcr}
+              />{" "}
+              Capture screenshots and read on-screen text (OCR). This is
+              Level 4's own separate opt-in — turning it off stops screenshot
+              capture immediately, even while Level 4 stays selected.
+            </label>
           </p>
         )}
       </div>

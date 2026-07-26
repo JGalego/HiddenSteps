@@ -16,7 +16,12 @@
 //! gap: Level 3 is not currently distinguishable from Level 2 in stored data.
 
 mod classify;
+mod ocr;
 mod pipeline;
 
 pub use classify::{minimum_level_for, FieldValue};
-pub use pipeline::{DropReason, EventPipeline, NoTextExtraction, PipelineOutcome, TextExtractor};
+pub use ocr::{OcrExtractorError, OcrsTextExtractor};
+pub use pipeline::{
+    DropReason, EventPipeline, NoTextExtraction, PipelineOutcome, TextExtractor,
+    DEFAULT_DEEP_MODE_TTL,
+};

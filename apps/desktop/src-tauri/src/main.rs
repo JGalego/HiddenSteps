@@ -3,6 +3,7 @@
 
 mod commands;
 mod observation_loop;
+mod ocr_models;
 mod recommendation_loop;
 mod state;
 

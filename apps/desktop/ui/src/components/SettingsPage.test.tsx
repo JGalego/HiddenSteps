@@ -12,6 +12,8 @@ vi.mock("../tauriBridge", () => ({
     setPrivacyLevel: vi.fn(),
     getCloudConsent: vi.fn(),
     setCloudConsent: vi.fn(),
+    getSettings: vi.fn(),
+    updateSettings: vi.fn(),
   },
 }));
 
@@ -40,6 +42,8 @@ describe("SettingsPage", () => {
     mockedBridge.setPrivacyLevel.mockResolvedValue({ effective_level: 2 });
     mockedBridge.getCloudConsent.mockResolvedValue(false);
     mockedBridge.setCloudConsent.mockResolvedValue(true);
+    mockedBridge.getSettings.mockResolvedValue(false);
+    mockedBridge.updateSettings.mockResolvedValue(true);
   });
 
   it("shows the current privacy level and the active provider", async () => {
@@ -109,5 +113,45 @@ describe("SettingsPage", () => {
 
     await user.click(screen.getByRole("button", { name: "Raise" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("policy floor violation");
+  });
+
+  it("does not show the Deep-mode screenshot+OCR toggle below Level 4", async () => {
+    render(<SettingsPage />);
+    await screen.findByText("2");
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+  });
+
+  it("shows the Deep-mode screenshot+OCR toggle at Level 4, reflecting its current setting", async () => {
+    mockedBridge.getObservationStatus.mockResolvedValue({
+      current_level: 4,
+      consented_manifest_version: 2,
+      observation_active: true,
+      updated_at: "2026-07-16T00:00:00Z",
+    });
+    mockedBridge.getSettings.mockResolvedValue(true);
+    render(<SettingsPage />);
+    const checkbox = await screen.findByRole("checkbox");
+    expect(checkbox).toBeChecked();
+    expect(mockedBridge.getSettings).toHaveBeenCalledWith("deep_mode_screenshot_ocr_enabled");
+  });
+
+  it("toggling the Deep-mode screenshot+OCR checkbox calls update_settings with the flipped value", async () => {
+    const user = userEvent.setup();
+    mockedBridge.getObservationStatus.mockResolvedValue({
+      current_level: 4,
+      consented_manifest_version: 2,
+      observation_active: true,
+      updated_at: "2026-07-16T00:00:00Z",
+    });
+    mockedBridge.getSettings.mockResolvedValue(false);
+    render(<SettingsPage />);
+    const checkbox = await screen.findByRole("checkbox");
+    expect(checkbox).not.toBeChecked();
+
+    await user.click(checkbox);
+    expect(mockedBridge.updateSettings).toHaveBeenCalledWith(
+      "deep_mode_screenshot_ocr_enabled",
+      true
+    );
   });
 });

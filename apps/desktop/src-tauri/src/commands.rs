@@ -44,6 +44,18 @@ pub(crate) fn log_audit(store: &hiddensteps_event_store::SqlCipherEventStore, en
 /// launch rather than carried across restarts as separate state).
 pub const CLOUD_CONSENT_SETTING_KEY: &str = "cloud_consent_general";
 
+/// Whether the user has separately opted into Level 4's screenshot+OCR
+/// capture (`hiddensteps_observation::ScreenshotSource` +
+/// `hiddensteps_pipeline::OcrsTextExtractor`), per
+/// `docs/design/05-privacy-model.md` §1's requirement that each Level-4
+/// sub-capability be "explicit, separately-opted-in... each independently
+/// toggleable" rather than bundled into the coarse level-4 selection alone.
+/// `observation_loop` reads this every tick (alongside the current privacy
+/// level) before ever calling `poll` on the screenshot source — turning this
+/// off stops capture immediately, without needing a privacy-level change or
+/// an app restart.
+pub const DEEP_MODE_SCREENSHOT_OCR_SETTING_KEY: &str = "deep_mode_screenshot_ocr_enabled";
+
 // --- Onboarding & setup ---
 
 #[tauri::command]
@@ -621,7 +633,10 @@ pub async fn set_cloud_consent(state: State<'_, AppState>, granted: bool) -> Res
 /// treat as trusted, like cloud-consent. Every key a UI legitimately needs
 /// belongs on this list; anything else is a bug or an attempt to reach
 /// somewhere it shouldn't, and is rejected rather than silently served.
-const ALLOWED_SETTING_KEYS: &[&str] = &[CLOUD_CONSENT_SETTING_KEY];
+const ALLOWED_SETTING_KEYS: &[&str] = &[
+    CLOUD_CONSENT_SETTING_KEY,
+    DEEP_MODE_SCREENSHOT_OCR_SETTING_KEY,
+];
 
 fn check_setting_key(key: &str) -> Result<(), String> {
     if ALLOWED_SETTING_KEYS.contains(&key) {

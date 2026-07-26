@@ -24,6 +24,18 @@ impl TextExtractor for NoTextExtraction {
     }
 }
 
+/// Lets a caller that only knows *at runtime* which `TextExtractor` it has
+/// (e.g. `apps/desktop/src-tauri`'s `observation_loop`, which picks
+/// `hiddensteps_pipeline::OcrsTextExtractor` if its OCR models are available
+/// and falls back to `NoTextExtraction` otherwise) build a single
+/// `EventPipeline<Box<dyn TextExtractor>>` instead of needing two differently-
+/// typed `EventPipeline`s and a branch at every call site that uses one.
+impl<T: TextExtractor + ?Sized> TextExtractor for Box<T> {
+    fn extract(&self, raw_bytes: &[u8]) -> Option<String> {
+        (**self).extract(raw_bytes)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DropReason {
     /// The Redaction Engine found an ambiguous (not high-confidence) match and,

@@ -5,7 +5,10 @@ use std::time::Duration;
 use hiddensteps_domain::PrivacyLevel;
 use hiddensteps_event_store::SqlCipherEventStore;
 use hiddensteps_observation::ObservationSource;
-use hiddensteps_pipeline::{EventPipeline, PipelineOutcome};
+use hiddensteps_pipeline::{
+    EventPipeline, NoTextExtraction, OcrsTextExtractor, PipelineOutcome, TextExtractor,
+    DEFAULT_DEEP_MODE_TTL,
+};
 use tauri::{AppHandle, Emitter};
 use time::OffsetDateTime;
 
@@ -32,7 +35,8 @@ pub async fn run(app: AppHandle, store: Arc<SqlCipherEventStore>) {
     if sources.is_empty() {
         return;
     }
-    let pipeline = EventPipeline::new();
+    let text_extractor = build_text_extractor(&app, &store).await;
+    let pipeline = EventPipeline::with_text_extractor(text_extractor, Some(DEFAULT_DEEP_MODE_TTL));
 
     loop {
         let privacy_state = match store.get_privacy_state() {
@@ -58,7 +62,37 @@ pub async fn run(app: AppHandle, store: Arc<SqlCipherEventStore>) {
             continue;
         }
 
+        // Re-read every tick (not just once at startup): this is what makes
+        // toggling either the privacy level or the Level-4 screenshot+OCR
+        // sub-capability (`commands::DEEP_MODE_SCREENSHOT_OCR_SETTING_KEY`)
+        // take effect on the very next poll, not just on the next app
+        // restart.
+        let deep_mode_screenshot_ocr_enabled = deep_mode_screenshot_ocr_enabled(&store);
+
         for source in &mut sources {
+            // Defensive, belt-and-suspenders gate (the pipeline enforces this
+            // too, in `minimum_level_for` — see its doc comment): never even
+            // call `poll` on a source above the currently active privacy
+            // level. Before this, every source's `poll` ran every tick
+            // regardless of level, relying entirely on the pipeline to drop
+            // the resulting signal afterward — harmless for a metadata-only
+            // source, but wrong for a Level-4 source, since it means an
+            // OS-level screenshot would actually be captured every tick even
+            // at Level 0-3, just to be discarded a moment later.
+            if source.min_privacy_level() > privacy_state.current_level {
+                continue;
+            }
+            // A source's `min_privacy_level` being `MaximumAssistance` marks
+            // it as Deep-mode content (screenshot/OCR/accessibility-tree,
+            // per `docs/design/05-privacy-model.md` §1) — which needs its own
+            // sub-capability opt-in on top of the coarse level-4 selection,
+            // not just "the user is somewhere at or above Level 4."
+            if source.min_privacy_level() == PrivacyLevel::MaximumAssistance
+                && !deep_mode_screenshot_ocr_enabled
+            {
+                continue;
+            }
+
             match source.poll() {
                 Ok(signals) => {
                     for signal in signals {
@@ -89,6 +123,64 @@ pub async fn run(app: AppHandle, store: Arc<SqlCipherEventStore>) {
         }
 
         tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+}
+
+fn deep_mode_screenshot_ocr_enabled(store: &SqlCipherEventStore) -> bool {
+    matches!(
+        store.get_setting(crate::commands::DEEP_MODE_SCREENSHOT_OCR_SETTING_KEY),
+        Ok(Some(serde_json::Value::Bool(true)))
+    )
+}
+
+/// Picks the pipeline's `TextExtractor` once, at loop startup: a real
+/// `OcrsTextExtractor` if the user is already at Level 4 with screenshot+OCR
+/// enabled *and* its model files can be provisioned, or `NoTextExtraction`
+/// otherwise (in which case a Deep-mode screenshot signal drops with
+/// `DropReason::OcrUnavailable`, per that type's own doc comment — never
+/// silently stored unread).
+///
+/// Disclosed limitation: this is a one-time, startup-only decision, not a
+/// live-reloading one, unlike the per-tick privacy-level/sub-capability gate
+/// above. A user who enables Level 4 + screenshot/OCR mid-session (without
+/// restarting the app) will have screenshots captured (the per-tick gate
+/// allows that immediately) but dropped as `OcrUnavailable` until the next
+/// restart re-runs this function. Making OCR-extractor selection itself fully
+/// dynamic (lazy-init with retry/backoff on model-download failure) is a
+/// reasonable follow-up, not attempted here to keep this change to what a
+/// working screenshot+OCR producer needs.
+async fn build_text_extractor(
+    app: &AppHandle,
+    store: &SqlCipherEventStore,
+) -> Box<dyn TextExtractor> {
+    let privacy_state = match store.get_privacy_state() {
+        Ok(state) => state,
+        Err(_) => return Box::new(NoTextExtraction),
+    };
+    if privacy_state.current_level != PrivacyLevel::MaximumAssistance
+        || !deep_mode_screenshot_ocr_enabled(store)
+    {
+        return Box::new(NoTextExtraction);
+    }
+
+    let cache_dir = crate::data_dir()
+        .parent()
+        .map(|p| p.join("ocr-models"))
+        .unwrap_or_else(|| PathBuf::from("ocr-models"));
+    match crate::ocr_models::ensure_ocr_models(&cache_dir).await {
+        Ok((detection_path, recognition_path)) => {
+            match OcrsTextExtractor::from_model_files(&detection_path, &recognition_path) {
+                Ok(extractor) => Box::new(extractor),
+                Err(e) => {
+                    report_source_error(app, "deep_mode.ocr_engine_init", e);
+                    Box::new(NoTextExtraction)
+                }
+            }
+        }
+        Err(e) => {
+            report_source_error(app, "deep_mode.ocr_model_download", e);
+            Box::new(NoTextExtraction)
+        }
     }
 }
 
@@ -131,6 +223,7 @@ fn build_sources(app: &AppHandle) -> Vec<Box<dyn ObservationSource>> {
     use hiddensteps_observation::linux::{
         ActiveWindowSource, ClipboardMetadataSource, FileOperationSource,
     };
+    use hiddensteps_observation::ScreenshotSource;
 
     let mut sources: Vec<Box<dyn ObservationSource>> = Vec::new();
 
@@ -148,6 +241,12 @@ fn build_sources(app: &AppHandle) -> Vec<Box<dyn ObservationSource>> {
             Err(e) => report_source_error(app, "linux.file_operations", e),
         }
     }
+    // Cross-platform (see `ScreenshotSource`'s doc comment) — always
+    // constructed here regardless of the active privacy level, matching every
+    // other source above; the run loop's per-tick gate is what actually keeps
+    // it from being polled below Level 4 or without the screenshot+OCR
+    // sub-capability turned on.
+    sources.push(Box::new(ScreenshotSource::new()));
 
     sources
 }
@@ -157,6 +256,7 @@ fn build_sources(app: &AppHandle) -> Vec<Box<dyn ObservationSource>> {
     use hiddensteps_observation::windows::{
         ActiveWindowSource, ClipboardMetadataSource, FileOperationSource,
     };
+    use hiddensteps_observation::ScreenshotSource;
 
     let mut sources: Vec<Box<dyn ObservationSource>> = vec![
         Box::new(ActiveWindowSource::new()),
@@ -169,6 +269,7 @@ fn build_sources(app: &AppHandle) -> Vec<Box<dyn ObservationSource>> {
             Err(e) => report_source_error(app, "windows.file_operations", e),
         }
     }
+    sources.push(Box::new(ScreenshotSource::new()));
 
     sources
 }
@@ -176,8 +277,12 @@ fn build_sources(app: &AppHandle) -> Vec<Box<dyn ObservationSource>> {
 #[cfg(target_os = "macos")]
 fn build_sources(_app: &AppHandle) -> Vec<Box<dyn ObservationSource>> {
     use hiddensteps_observation::macos::ActiveWindowSource;
+    use hiddensteps_observation::ScreenshotSource;
 
-    vec![Box::new(ActiveWindowSource::new())]
+    vec![
+        Box::new(ActiveWindowSource::new()),
+        Box::new(ScreenshotSource::new()),
+    ]
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]

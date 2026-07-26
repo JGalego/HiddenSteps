@@ -22,6 +22,19 @@
 //!   risk: it's built on the same cross-platform `notify` crate Linux's
 //!   `file_ops` uses, so it carries no hand-written Win32 FFI of its own.
 //!
+//! - **Deep-mode screenshot capture** (`screenshot` module, cross-platform, not
+//!   `cfg`-gated): the first real producer of Level 4 ("Maximum assistance")
+//!   content, via the actively-maintained [`xcap`](https://crates.io/crates/xcap)
+//!   crate rather than three hand-rolled per-OS backends. Verified for real
+//!   against the same Xvfb X11 display Linux's other sources use (see
+//!   `screenshot`'s tests) — the macOS/Windows code paths inside `xcap` itself
+//!   are not exercised here, the same disclosed gap as this crate's other
+//!   non-Linux code below. Building this crate on Linux needs a handful of
+//!   extra system `-dev` packages `xcap` pulls in for screen-recording support
+//!   this source never uses (see `../README.md` and `screenshot.rs`'s doc
+//!   comment) — the one place this crate is no longer "zero system
+//!   dependencies beyond what `cargo` fetches."
+//!
 //! Two signal sources named in `docs/design/05-privacy-model.md` §1 are
 //! deliberately **not** implemented anywhere in this crate yet, and that gap is
 //! disclosed rather than papered over with a stub:
@@ -42,8 +55,10 @@
 //!   same "don't do this by default in a shared environment" reason the real
 //!   OS-vault test in `hiddensteps-security` is.
 
+mod screenshot;
 mod source;
 
+pub use screenshot::ScreenshotSource;
 pub use source::{ObservationSource, PollError};
 
 #[cfg(target_os = "linux")]
