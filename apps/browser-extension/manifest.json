@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "HiddenSteps Companion",
+  "version": "0.1.0",
+  "description": "Reports the active tab's domain (Privacy Level 2+) and, at Level 3+, its page title to the local HiddenSteps desktop app. Never sends the full URL, path, query string, or page content.",
+  "minimum_chrome_version": "116",
+  "permissions": ["tabs", "storage", "alarms"],
+  "host_permissions": ["http://127.0.0.1:*/*"],
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "options_ui": {
+    "page": "src/options.html",
+    "open_in_tab": true
+  }
+}

@@ -56,6 +56,15 @@ pub const CLOUD_CONSENT_SETTING_KEY: &str = "cloud_consent_general";
 /// an app restart.
 pub const DEEP_MODE_SCREENSHOT_OCR_SETTING_KEY: &str = "deep_mode_screenshot_ocr_enabled";
 
+/// The settings-table key `observation_loop::resolve_browser_bridge_token`
+/// persists the browser-extension pairing token under — generated once, on
+/// first run, before this app's Tauri builder even starts (see that
+/// function's doc comment). Not on `ALLOWED_SETTING_KEYS` below: unlike
+/// `DEEP_MODE_SCREENSHOT_OCR_SETTING_KEY`, there's no legitimate reason for
+/// the UI to *write* this key through the generic settings commands — only
+/// read it, via the dedicated `get_browser_bridge_status` below.
+pub const BROWSER_BRIDGE_TOKEN_SETTING_KEY: &str = "browser_bridge_token";
+
 // --- Onboarding & setup ---
 
 #[tauri::command]
@@ -411,6 +420,67 @@ pub async fn acknowledge_privacy_manifest(state: State<'_, AppState>) -> Result<
         ),
     );
     Ok(true)
+}
+
+/// What Settings shows for the browser-extension bridge
+/// (`hiddensteps_observation::BrowserBridgeSource`): the pairing token and
+/// port the extension's options page needs, plus a best-effort read on
+/// whether it looks like the extension is actually reaching this app.
+#[derive(Serialize)]
+pub struct BrowserBridgeStatus {
+    pub token: String,
+    pub port: u16,
+    /// When a `browser_bridge.extension`-sourced event was last recorded, if
+    /// ever. `None` doesn't necessarily mean the extension has never
+    /// connected — see `receiving_data`'s doc comment for the same caveat.
+    pub last_seen: Option<OffsetDateTime>,
+    /// Derived, not tracked live: true when `last_seen` falls within a short
+    /// recency window. This is a real, measured signal (an actual persisted
+    /// event, the same `get_diagnostics` "real, measured data" standard
+    /// applies) but an approximate one — a paired extension that's simply
+    /// had no tab change in the last few minutes (or is capturing only a
+    /// signal type the current privacy level doesn't allow yet) will show as
+    /// not-yet-receiving here even though it's correctly paired and idle,
+    /// not broken. A live connection tracker (the bridge's HTTP server
+    /// reporting "request received at T" independent of whether that request
+    /// produced a storable event) would be more precise and is a reasonable
+    /// follow-up, not attempted here to avoid threading a second piece of
+    /// live cross-task state through `AppState` for what recent-event
+    /// recency already answers well enough for a status display.
+    pub receiving_data: bool,
+}
+
+#[tauri::command]
+pub async fn get_browser_bridge_status(
+    state: State<'_, AppState>,
+) -> Result<BrowserBridgeStatus, String> {
+    let token = state
+        .store
+        .get_setting(BROWSER_BRIDGE_TOKEN_SETTING_KEY)
+        .map_err(to_err)?
+        .and_then(|v| v.as_str().map(str::to_string))
+        .unwrap_or_default();
+
+    // A bounded recent-events scan, not a dedicated "last event per source"
+    // query — `EventStore` has no such lookup today (see this function's own
+    // `receiving_data` doc comment on the resulting approximation), and
+    // adding one is more schema/API surface than a status display needs.
+    let recent = state.store.list_recent_events(50).map_err(to_err)?;
+    let last_seen = recent
+        .iter()
+        .filter(|e| e.source_id == hiddensteps_observation::BrowserBridgeSource::SOURCE_ID)
+        .map(|e| e.occurred_at)
+        .max();
+    let receiving_data = last_seen
+        .map(|seen_at| OffsetDateTime::now_utc() - seen_at < time::Duration::minutes(5))
+        .unwrap_or(false);
+
+    Ok(BrowserBridgeStatus {
+        token,
+        port: hiddensteps_observation::BrowserBridgeSource::DEFAULT_PORT,
+        last_seen,
+        receiving_data,
+    })
 }
 
 #[tauri::command]

@@ -14,7 +14,19 @@
 /// a fresh, accurate re-consent for exactly the users this newly affects —
 /// per `docs/design/05-privacy-model.md` §5's rule that a manifest change
 /// requires re-consent from anyone on the affected level, not just new users.
-pub const CURRENT_MANIFEST_VERSION: i64 = 2;
+///
+/// Bumped 2 -> 3: Levels 2 and 3 gained their first real browser-activity
+/// capture capability — `hiddensteps_observation::BrowserBridgeSource`
+/// (`CapturedPayload::BrowserDomainVisited` at Level 2,
+/// `CapturedPayload::BrowserPageTitleViewed` at Level 3), fed by a new
+/// browser-extension component (`apps/browser-extension`) rather than
+/// inferred from a window title as before. Before this, both levels were
+/// documented, consentable manifest entries that this implementation never
+/// actually produced — same situation as Level 4 pre-bump-2 — so anyone
+/// already on Level 2 or 3 consented to a manifest that didn't yet describe
+/// real domain/title capture, and needs the same fresh, accurate re-consent
+/// this bump forces for exactly those two levels.
+pub const CURRENT_MANIFEST_VERSION: i64 = 3;
 
 /// Per `docs/design/05-privacy-model.md` §5: each privacy level's signal manifest
 /// is versioned. If a future release changes what a level captures, the affected

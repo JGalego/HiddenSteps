@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { tauriBridge, type LlmProviderConfig, type PrivacyState } from "../tauriBridge";
+import {
+  tauriBridge,
+  type BrowserBridgeStatus,
+  type LlmProviderConfig,
+  type PrivacyState,
+} from "../tauriBridge";
 import { acknowledgedPermissionsFor } from "../privacyLevels";
 
 // The settings-table key `observation_loop`'s screenshot+OCR gate reads every
@@ -22,21 +27,24 @@ export function SettingsPage() {
   const [providers, setProviders] = useState<LlmProviderConfig[]>([]);
   const [cloudConsent, setCloudConsentState] = useState(false);
   const [deepModeScreenshotOcr, setDeepModeScreenshotOcr] = useState(false);
+  const [browserBridge, setBrowserBridge] = useState<BrowserBridgeStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
-      const [nextStatus, nextProviders, nextCloudConsent, nextDeepModeSetting] =
+      const [nextStatus, nextProviders, nextCloudConsent, nextDeepModeSetting, nextBrowserBridge] =
         await Promise.all([
           tauriBridge.getObservationStatus(),
           tauriBridge.listLlmProviders(),
           tauriBridge.getCloudConsent(),
           tauriBridge.getSettings(DEEP_MODE_SCREENSHOT_OCR_SETTING_KEY),
+          tauriBridge.getBrowserBridgeStatus(),
         ]);
       setStatus(nextStatus);
       setProviders(nextProviders);
       setCloudConsentState(nextCloudConsent);
       setDeepModeScreenshotOcr(nextDeepModeSetting === true);
+      setBrowserBridge(nextBrowserBridge);
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -74,6 +82,18 @@ export function SettingsPage() {
       await refresh();
     } catch (e) {
       setError(String(e));
+    }
+  };
+
+  const copyBridgeToken = async () => {
+    if (!browserBridge) return;
+    try {
+      await navigator.clipboard.writeText(browserBridge.token);
+    } catch {
+      // Clipboard access can be denied/unavailable (permissions, a
+      // non-secure context, a test environment) — the token is still shown
+      // in the page for manual copy/paste, so a failed clipboard write isn't
+      // worth surfacing as an error banner.
     }
   };
 
@@ -154,6 +174,34 @@ export function SettingsPage() {
               generated using a local provider.
             </label>
           </p>
+        )}
+      </div>
+
+      <div className="card section-block">
+        <h2>Browser Extension</h2>
+        {browserBridge && (
+          <>
+            <p data-testid="browser-bridge-status">
+              {browserBridge.receiving_data
+                ? "Receiving browser activity from the extension."
+                : "Not yet receiving data from the extension."}
+            </p>
+            <p>
+              Install the HiddenSteps Companion extension (Chrome/Chromium),
+              then paste this pairing token into its options page:
+            </p>
+            <p>
+              <code data-testid="browser-bridge-token">{browserBridge.token}</code>{" "}
+              <button className="btn" type="button" onClick={copyBridgeToken}>
+                Copy
+              </button>
+            </p>
+            <p>
+              Bridge port: <strong>{browserBridge.port}</strong>. Browser
+              domain reporting requires Privacy Level 2 or above; page titles
+              require Level 3 or above.
+            </p>
+          </>
         )}
       </div>
     </section>

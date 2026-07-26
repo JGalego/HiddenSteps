@@ -145,6 +145,10 @@ fn main() {
     }
 
     let enterprise_policy = resolve_enterprise_policy(&dir, &store);
+    // Resolved synchronously here, before the Tauri builder even starts, so
+    // there is no window where `commands::get_browser_bridge_status` could
+    // run before a token exists — see `observation_loop::run`'s doc comment.
+    let browser_bridge_token = observation_loop::resolve_browser_bridge_token(&store);
 
     let app_state = state::AppState {
         store: store.clone(),
@@ -172,7 +176,7 @@ fn main() {
             let observation_handle = app.handle().clone();
             let observation_state_handle = app.handle().clone();
             let observation_task = tokio::spawn(async move {
-                observation_loop::run(observation_handle, store).await;
+                observation_loop::run(observation_handle, store, browser_bridge_token).await;
             });
             tauri::async_runtime::spawn(async move {
                 let state = observation_state_handle.state::<state::AppState>();
@@ -189,6 +193,7 @@ fn main() {
             commands::set_privacy_level,
             commands::complete_onboarding,
             commands::get_observation_status,
+            commands::get_browser_bridge_status,
             commands::get_privacy_manifest_status,
             commands::acknowledge_privacy_manifest,
             commands::pause_observation,

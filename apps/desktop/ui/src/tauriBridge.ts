@@ -111,6 +111,13 @@ export interface PrivacyManifestStatus {
   reconsent_required: boolean;
 }
 
+export interface BrowserBridgeStatus {
+  token: string;
+  port: number;
+  last_seen: string | null;
+  receiving_data: boolean;
+}
+
 export interface AuditEntry {
   id: number | null;
   occurred_at: string;
@@ -160,6 +167,9 @@ export const tauriBridge = {
   getAuditLog: (limit: number): Promise<AuditEntry[]> => invoke("get_audit_log", { limit }),
 
   getObservationStatus: (): Promise<PrivacyState> => invoke("get_observation_status"),
+
+  getBrowserBridgeStatus: (): Promise<BrowserBridgeStatus> =>
+    invoke("get_browser_bridge_status"),
 
   getPrivacyManifestStatus: (): Promise<PrivacyManifestStatus> =>
     invoke("get_privacy_manifest_status"),

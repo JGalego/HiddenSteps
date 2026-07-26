@@ -7,13 +7,17 @@
 //!
 //! Note on scope: Level 3 (ContextAware) in `docs/design/05-privacy-model.md` §1 is
 //! described as "richer context" layered onto Level 2's signal types (fuller
-//! in-app action context, browser page title) rather than introducing wholly new
-//! signal types of its own. This implementation's `SignalType` enum (in the domain
-//! crate) does not yet model that richer-context distinction — `minimum_level_for`
-//! currently maps every Level-2-shaped signal to `WorkflowMetadata`, so a Level 3
-//! user sees the same signal *types* as Level 2 until a future milestone adds the
-//! richer variants. This is a deliberate, disclosed simplification, not a silent
-//! gap: Level 3 is not currently distinguishable from Level 2 in stored data.
+//! in-app action context, browser page title, limited file-operation context)
+//! rather than introducing wholly new signal types of its own. Browser page
+//! title is no longer part of that gap: `SignalType::BrowserPageTitleViewed`
+//! (produced by `hiddensteps_observation::BrowserBridgeSource`, the
+//! browser-extension bridge) is mapped by `minimum_level_for` to
+//! `PrivacyLevel::ContextAware` specifically, so it's the first signal type this
+//! implementation distinguishes as exclusively Level 3. The rest of the gap is
+//! still open: fuller in-app action context and file-operation extension detail
+//! have no dedicated signal types yet, so a Level 3 user sees the same
+//! `AppActionEvent`/`FileOperationMetadata` shapes Level 2 does for those two —
+//! a deliberate, disclosed simplification, not a silent one.
 
 mod classify;
 mod ocr;

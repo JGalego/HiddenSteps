@@ -1,10 +1,11 @@
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 use hiddensteps_domain::PrivacyLevel;
 use hiddensteps_event_store::SqlCipherEventStore;
-use hiddensteps_observation::ObservationSource;
+use hiddensteps_observation::{BrowserBridgeSource, ObservationSource};
 use hiddensteps_pipeline::{
     EventPipeline, NoTextExtraction, OcrsTextExtractor, PipelineOutcome, TextExtractor,
     DEFAULT_DEEP_MODE_TTL,
@@ -30,8 +31,20 @@ use time::OffsetDateTime;
 /// a key combo session-wide is something a user must opt into explicitly, not
 /// something this loop starts by default — see
 /// `../../../crates/observation/src/lib.rs`'s doc comment.
-pub async fn run(app: AppHandle, store: Arc<SqlCipherEventStore>) {
-    let mut sources = build_sources(&app);
+///
+/// `browser_bridge_token` is resolved once, synchronously, in `main.rs` (see
+/// `resolve_browser_bridge_token`) — before this async loop even starts, so
+/// `commands::get_browser_bridge_status` never races this loop for "does a
+/// token exist yet."
+pub async fn run(app: AppHandle, store: Arc<SqlCipherEventStore>, browser_bridge_token: String) {
+    // Shared with every `BrowserBridgeSource` `build_sources` constructs
+    // (there's at most one, but the mechanism doesn't assume that) so this
+    // loop can keep the bridge's notion of "the currently active privacy
+    // level" current every tick, without needing to downcast out of the
+    // type-erased `Box<dyn ObservationSource>` values in `sources` below to
+    // reach a bridge-specific setter.
+    let bridge_level = Arc::new(AtomicU8::new(PrivacyLevel::Manual.as_u8()));
+    let mut sources = build_sources(&app, &browser_bridge_token, &bridge_level);
     if sources.is_empty() {
         return;
     }
@@ -54,10 +67,23 @@ pub async fn run(app: AppHandle, store: Arc<SqlCipherEventStore>) {
             privacy_state.consented_manifest_version,
             hiddensteps_privacy_engine::CURRENT_MANIFEST_VERSION,
         );
-        if !privacy_state.observation_active
+        let observation_gated_off = !privacy_state.observation_active
             || privacy_state.current_level == PrivacyLevel::Manual
-            || reconsent_required
-        {
+            || reconsent_required;
+        // Tell the bridge's `/v1/status`/`/v1/report` endpoints the level
+        // that's actually in effect this tick — `Manual` (rejecting every
+        // report) whenever observation as a whole is gated off, not just
+        // `privacy_state.current_level` verbatim, so a paused app or one
+        // pending re-consent stops accepting browser-activity reports the
+        // same tick it stops polling every other source, not just once the
+        // level itself is lowered.
+        let effective_bridge_level = if observation_gated_off {
+            PrivacyLevel::Manual
+        } else {
+            privacy_state.current_level
+        };
+        bridge_level.store(effective_bridge_level.as_u8(), Ordering::Relaxed);
+        if observation_gated_off {
             tokio::time::sleep(Duration::from_secs(2)).await;
             continue;
         }
@@ -131,6 +157,37 @@ fn deep_mode_screenshot_ocr_enabled(store: &SqlCipherEventStore) -> bool {
         store.get_setting(crate::commands::DEEP_MODE_SCREENSHOT_OCR_SETTING_KEY),
         Ok(Some(serde_json::Value::Bool(true)))
     )
+}
+
+/// Reads the persisted browser-extension pairing token
+/// (`BrowserBridgeSource`'s bearer-token check — see that type's doc comment
+/// for why this token, not the loopback binding or CORS, is the bridge's
+/// actual security boundary), generating and persisting a fresh one on first
+/// run. Called synchronously from `main.rs`, before this module's async `run`
+/// loop starts, so `commands::get_browser_bridge_status` never has to handle
+/// "the token doesn't exist yet" as a distinct state.
+///
+/// A 256-bit random token, hex-encoded — reusing
+/// `hiddensteps_security::generate_master_key`'s CSPRNG rather than pulling
+/// in a separate randomness dependency for one string; a pairing token has
+/// materially lower stakes than the database master key that function was
+/// written for, but there's no reason to reach for weaker randomness when a
+/// cryptographically strong generator is already a dependency.
+pub(crate) fn resolve_browser_bridge_token(store: &SqlCipherEventStore) -> String {
+    if let Ok(Some(serde_json::Value::String(existing))) =
+        store.get_setting(crate::commands::BROWSER_BRIDGE_TOKEN_SETTING_KEY)
+    {
+        if !existing.is_empty() {
+            return existing;
+        }
+    }
+    let key = hiddensteps_security::generate_master_key();
+    let token: String = key.iter().map(|b| format!("{b:02x}")).collect();
+    let _ = store.set_setting(
+        crate::commands::BROWSER_BRIDGE_TOKEN_SETTING_KEY,
+        &serde_json::Value::String(token.clone()),
+    );
+    token
 }
 
 /// Picks the pipeline's `TextExtractor` once, at loop startup: a real
@@ -218,8 +275,37 @@ fn report_source_error(app: &AppHandle, source_id: &str, error: impl std::fmt::D
     );
 }
 
+/// Constructs the browser-extension bridge (cross-platform — see
+/// `BrowserBridgeSource`'s doc comment) and pushes it into `sources` on
+/// success, exactly like `ScreenshotSource` is added by every platform's
+/// `build_sources` below. Factored out once rather than duplicated four
+/// times, since — unlike `ScreenshotSource::new()`, which is infallible —
+/// this construction takes the token/level-cell parameters `build_sources`
+/// itself was handed and can fail (the fixed port already in use), which
+/// needs the same `report_source_error` handling every fallible source here
+/// already gets.
+fn push_browser_bridge_source(
+    app: &AppHandle,
+    sources: &mut Vec<Box<dyn ObservationSource>>,
+    bridge_token: &str,
+    bridge_level: &Arc<AtomicU8>,
+) {
+    match BrowserBridgeSource::start(
+        bridge_token.to_string(),
+        BrowserBridgeSource::DEFAULT_PORT,
+        Arc::clone(bridge_level),
+    ) {
+        Ok(source) => sources.push(Box::new(source)),
+        Err(e) => report_source_error(app, BrowserBridgeSource::SOURCE_ID, e),
+    }
+}
+
 #[cfg(target_os = "linux")]
-fn build_sources(app: &AppHandle) -> Vec<Box<dyn ObservationSource>> {
+fn build_sources(
+    app: &AppHandle,
+    bridge_token: &str,
+    bridge_level: &Arc<AtomicU8>,
+) -> Vec<Box<dyn ObservationSource>> {
     use hiddensteps_observation::linux::{
         ActiveWindowSource, ClipboardMetadataSource, FileOperationSource,
     };
@@ -247,12 +333,22 @@ fn build_sources(app: &AppHandle) -> Vec<Box<dyn ObservationSource>> {
     // it from being polled below Level 4 or without the screenshot+OCR
     // sub-capability turned on.
     sources.push(Box::new(ScreenshotSource::new()));
+    // Also cross-platform (see `BrowserBridgeSource`'s doc comment) — its own
+    // per-tick level updates (`bridge_level`, refreshed every tick in `run`)
+    // are what make its `/v1/report` endpoint stop accepting domain/title
+    // reports below the level each requires, the same belt-and-suspenders
+    // discipline `ScreenshotSource` relies on the run loop's gate for.
+    push_browser_bridge_source(app, &mut sources, bridge_token, bridge_level);
 
     sources
 }
 
 #[cfg(target_os = "windows")]
-fn build_sources(app: &AppHandle) -> Vec<Box<dyn ObservationSource>> {
+fn build_sources(
+    app: &AppHandle,
+    bridge_token: &str,
+    bridge_level: &Arc<AtomicU8>,
+) -> Vec<Box<dyn ObservationSource>> {
     use hiddensteps_observation::windows::{
         ActiveWindowSource, ClipboardMetadataSource, FileOperationSource,
     };
@@ -270,23 +366,35 @@ fn build_sources(app: &AppHandle) -> Vec<Box<dyn ObservationSource>> {
         }
     }
     sources.push(Box::new(ScreenshotSource::new()));
+    push_browser_bridge_source(app, &mut sources, bridge_token, bridge_level);
 
     sources
 }
 
 #[cfg(target_os = "macos")]
-fn build_sources(_app: &AppHandle) -> Vec<Box<dyn ObservationSource>> {
+fn build_sources(
+    app: &AppHandle,
+    bridge_token: &str,
+    bridge_level: &Arc<AtomicU8>,
+) -> Vec<Box<dyn ObservationSource>> {
     use hiddensteps_observation::macos::ActiveWindowSource;
     use hiddensteps_observation::ScreenshotSource;
 
-    vec![
+    let mut sources: Vec<Box<dyn ObservationSource>> = vec![
         Box::new(ActiveWindowSource::new()),
         Box::new(ScreenshotSource::new()),
-    ]
+    ];
+    push_browser_bridge_source(app, &mut sources, bridge_token, bridge_level);
+
+    sources
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
-fn build_sources(_app: &AppHandle) -> Vec<Box<dyn ObservationSource>> {
+fn build_sources(
+    _app: &AppHandle,
+    _bridge_token: &str,
+    _bridge_level: &Arc<AtomicU8>,
+) -> Vec<Box<dyn ObservationSource>> {
     // No compiled `ObservationSource` backend exists for this target — see
     // `../../../crates/observation/src/lib.rs`'s doc comment for the three
     // that do.

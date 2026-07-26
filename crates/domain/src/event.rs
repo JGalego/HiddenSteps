@@ -13,6 +13,10 @@ pub enum SignalType {
     ShortcutUsed,
     AppActionEvent,
     BrowserDomainVisited,
+    /// Level 3's page-title counterpart to `BrowserDomainVisited` — see
+    /// `CapturedPayload::BrowserPageTitleViewed`'s doc comment for why this is a
+    /// sibling variant rather than an optional field on the domain signal.
+    BrowserPageTitleViewed,
     ClipboardMetadata,
     FileOperationMetadata,
     OcrText,

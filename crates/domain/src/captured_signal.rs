@@ -35,6 +35,19 @@ pub enum CapturedPayload {
     BrowserDomainVisited {
         domain: String,
     },
+    /// Level 3 ("Context-aware")'s addition to Level 2's `BrowserDomainVisited`,
+    /// per `docs/design/05-privacy-model.md` §1 — still never the full URL, path,
+    /// query string, or fragment, only the page's title text. Modeled as its own
+    /// sibling variant (mirroring `AppFocusChange`/`WindowTitle` above: two
+    /// related-but-distinct signals from the same underlying source, not one
+    /// struct with an optional field) so `minimum_level_for` in
+    /// `hiddensteps-pipeline` can keep mapping each variant to exactly one
+    /// static privacy level — a page title requires Level 3, a domain alone
+    /// only Level 2, and an `ObservationSource` may legitimately produce one
+    /// without the other.
+    BrowserPageTitleViewed {
+        title: String,
+    },
     ClipboardMetadata {
         content_type: String,
         size_bytes: usize,

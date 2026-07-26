@@ -214,6 +214,76 @@ mod tests {
     }
 
     #[test]
+    fn browser_domain_is_summarized_at_workflow_metadata_level() {
+        // `BrowserDomainVisited` -> `SignalType::BrowserDomainVisited`, which
+        // `minimum_level_for` maps to `WorkflowMetadata` (Level 2) — the
+        // classify-stage wiring `BrowserBridgeSource` depends on.
+        let pipeline = EventPipeline::new();
+        let outcome = pipeline.process(
+            signal(
+                "browser_bridge.extension",
+                CapturedPayload::BrowserDomainVisited {
+                    domain: "example.com".to_string(),
+                },
+            ),
+            PrivacyLevel::WorkflowMetadata,
+            OffsetDateTime::now_utc(),
+        );
+        match outcome {
+            PipelineOutcome::Summarized(event) => {
+                assert_eq!(event.summary["domain"], "example.com");
+            }
+            PipelineOutcome::Dropped(reason) => panic!("expected Summarized, got {reason:?}"),
+        }
+    }
+
+    #[test]
+    fn browser_page_title_requires_context_aware_not_just_workflow_metadata() {
+        // `BrowserPageTitleViewed` -> `SignalType::BrowserPageTitleViewed`,
+        // which `minimum_level_for` maps to `ContextAware` (Level 3) — one
+        // level above its sibling `BrowserDomainVisited` signal, per
+        // `docs/design/05-privacy-model.md` §1. Supplying Level 2
+        // (`WorkflowMetadata`) must drop it even though the *source* that
+        // produced it is allowed to run at Level 2.
+        let pipeline = EventPipeline::new();
+        let outcome = pipeline.process(
+            signal(
+                "browser_bridge.extension",
+                CapturedPayload::BrowserPageTitleViewed {
+                    title: "Example Domain".to_string(),
+                },
+            ),
+            PrivacyLevel::WorkflowMetadata,
+            OffsetDateTime::now_utc(),
+        );
+        assert!(matches!(
+            outcome,
+            PipelineOutcome::Dropped(DropReason::SignalNotAllowedAtCurrentLevel)
+        ));
+    }
+
+    #[test]
+    fn browser_page_title_is_summarized_at_context_aware_level() {
+        let pipeline = EventPipeline::new();
+        let outcome = pipeline.process(
+            signal(
+                "browser_bridge.extension",
+                CapturedPayload::BrowserPageTitleViewed {
+                    title: "Example Domain".to_string(),
+                },
+            ),
+            PrivacyLevel::ContextAware,
+            OffsetDateTime::now_utc(),
+        );
+        match outcome {
+            PipelineOutcome::Summarized(event) => {
+                assert_eq!(event.summary["title"], "Example Domain");
+            }
+            PipelineOutcome::Dropped(reason) => panic!("expected Summarized, got {reason:?}"),
+        }
+    }
+
+    #[test]
     fn secret_in_window_title_gets_redacted_not_leaked() {
         let pipeline = EventPipeline::new();
         let outcome = pipeline.process(

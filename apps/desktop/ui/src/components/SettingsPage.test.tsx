@@ -14,6 +14,7 @@ vi.mock("../tauriBridge", () => ({
     setCloudConsent: vi.fn(),
     getSettings: vi.fn(),
     updateSettings: vi.fn(),
+    getBrowserBridgeStatus: vi.fn(),
   },
 }));
 
@@ -44,6 +45,12 @@ describe("SettingsPage", () => {
     mockedBridge.setCloudConsent.mockResolvedValue(true);
     mockedBridge.getSettings.mockResolvedValue(false);
     mockedBridge.updateSettings.mockResolvedValue(true);
+    mockedBridge.getBrowserBridgeStatus.mockResolvedValue({
+      token: "abc123token",
+      port: 49231,
+      last_seen: null,
+      receiving_data: false,
+    });
   });
 
   it("shows the current privacy level and the active provider", async () => {
@@ -113,6 +120,42 @@ describe("SettingsPage", () => {
 
     await user.click(screen.getByRole("button", { name: "Raise" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("policy floor violation");
+  });
+
+  it("shows the browser bridge pairing token and port, and a not-yet-receiving status", async () => {
+    render(<SettingsPage />);
+    expect(await screen.findByTestId("browser-bridge-token")).toHaveTextContent("abc123token");
+    expect(screen.getByTestId("browser-bridge-status")).toHaveTextContent(
+      "Not yet receiving data from the extension."
+    );
+    expect(screen.getByText("49231")).toBeInTheDocument();
+  });
+
+  it("shows a receiving-data status once the bridge has recorded recent activity", async () => {
+    mockedBridge.getBrowserBridgeStatus.mockResolvedValue({
+      token: "abc123token",
+      port: 49231,
+      last_seen: "2026-07-16T00:00:00Z",
+      receiving_data: true,
+    });
+    render(<SettingsPage />);
+    expect(await screen.findByTestId("browser-bridge-status")).toHaveTextContent(
+      "Receiving browser activity from the extension."
+    );
+  });
+
+  it("copies the pairing token to the clipboard when Copy is clicked", async () => {
+    // `userEvent.setup()` installs its own `navigator.clipboard` stub
+    // (Testing Library's built-in clipboard support) — spy on *that* rather
+    // than replacing it beforehand, since setup() would otherwise clobber a
+    // pre-installed replacement.
+    const user = userEvent.setup();
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
+    render(<SettingsPage />);
+    await screen.findByTestId("browser-bridge-token");
+
+    await user.click(screen.getByRole("button", { name: "Copy" }));
+    expect(writeText).toHaveBeenCalledWith("abc123token");
   });
 
   it("does not show the Deep-mode screenshot+OCR toggle below Level 4", async () => {
