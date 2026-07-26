@@ -651,6 +651,81 @@ pub async fn set_recommendation_status(
     Ok(true)
 }
 
+/// Default "remind me tomorrow"-style snooze length, used whenever the caller
+/// doesn't supply its own `hours`. A day is long enough to be a genuine
+/// deferral (not "snooze" as a five-minute-later nag) while still coming back
+/// on a predictable, short cadence — matching the accept/dismiss actions this
+/// sits alongside on `RecommendationCard`, neither of which needs a
+/// configurable duration either.
+const SNOOZE_DEFAULT_HOURS: i64 = 24;
+
+/// A hard ceiling on the caller-supplied `hours`, independent of the default
+/// above — about 5 years. `request.hours` crosses the IPC boundary as a plain
+/// `i64` with no other bound on it; without clamping, a large-enough value
+/// passed to `time::Duration::hours` and then added to `OffsetDateTime` could
+/// overflow the representable date range and panic instead of returning a
+/// normal error. Nothing in the shipped UI ever sends more than
+/// `SNOOZE_DEFAULT_HOURS`, so this only ever matters for a future or
+/// misbehaving caller.
+const SNOOZE_MAX_HOURS: i64 = 24 * 365 * 5;
+
+#[derive(Deserialize)]
+pub struct SnoozeRecommendationRequest {
+    pub id: i64,
+    /// How many hours to snooze for. `None` or non-positive falls back to
+    /// `SNOOZE_DEFAULT_HOURS` — the UI's "Snooze" button doesn't need to ask
+    /// the user to pick a duration, but a future caller (or a richer UI) that
+    /// wants a specific one still can. Clamped to `SNOOZE_MAX_HOURS`.
+    pub hours: Option<i64>,
+}
+
+/// The snooze action alongside the existing accept ("implemented")/dismiss
+/// actions: suppresses this recommendation's notification until the snooze
+/// window passes, without dismissing or implementing it — it's still
+/// `Suggested`, just not due for another notification yet. See
+/// `EventStore::snooze_recommendation`'s doc comment for why this also resets
+/// `notified_at`, and `recommendation_loop`'s sweep for what actually
+/// respects `snoozed_until` on the delivery side.
+#[tauri::command]
+pub async fn snooze_recommendation(
+    state: State<'_, AppState>,
+    request: SnoozeRecommendationRequest,
+) -> Result<bool, String> {
+    let hours = request
+        .hours
+        .filter(|hours| *hours > 0)
+        .unwrap_or(SNOOZE_DEFAULT_HOURS)
+        .min(SNOOZE_MAX_HOURS);
+    let until = OffsetDateTime::now_utc() + time::Duration::hours(hours);
+
+    state
+        .store
+        .snooze_recommendation(request.id, until)
+        .map_err(to_err)?;
+
+    log_audit(
+        &state.store,
+        AuditEntry::new(
+            AuditActor::User,
+            "recommendation_snoozed",
+            // Formatted explicitly as RFC3339 text rather than relying on
+            // `OffsetDateTime`'s own `Serialize` impl inside `json!` — with
+            // just the `serde` feature (no `serde-human-readable`), `time`'s
+            // default representation is a compact non-string encoding, not
+            // an ISO string, which would be an odd, hard-to-read outlier
+            // among this audit log's otherwise-plain-text `details_json`
+            // entries.
+            serde_json::json!({
+                "id": request.id,
+                "snoozed_until": until
+                    .format(&time::format_description::well_known::Rfc3339)
+                    .unwrap_or_default(),
+            }),
+        ),
+    );
+    Ok(true)
+}
+
 // --- Cloud dispatch consent ---
 
 /// Whether the user has granted general consent for pattern summaries to be
@@ -706,6 +781,7 @@ pub async fn set_cloud_consent(state: State<'_, AppState>, granted: bool) -> Res
 const ALLOWED_SETTING_KEYS: &[&str] = &[
     CLOUD_CONSENT_SETTING_KEY,
     DEEP_MODE_SCREENSHOT_OCR_SETTING_KEY,
+    crate::recommendation_loop::NOTIFICATION_QUIET_HOURS_SETTING_KEY,
 ];
 
 fn check_setting_key(key: &str) -> Result<(), String> {

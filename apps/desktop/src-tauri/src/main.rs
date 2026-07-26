@@ -158,6 +158,7 @@ fn main() {
     };
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .manage(app_state)
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -206,6 +207,7 @@ fn main() {
             commands::list_recommendations,
             commands::get_recommendation_detail,
             commands::set_recommendation_status,
+            commands::snooze_recommendation,
             commands::get_cloud_consent,
             commands::set_cloud_consent,
             commands::get_settings,

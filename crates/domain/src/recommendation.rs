@@ -25,6 +25,25 @@ pub struct Recommendation {
     pub generating_provider: String,
     pub status: RecommendationStatus,
     pub dismissal_reason: Option<String>,
+    /// When an OS notification was last sent for this recommendation, if ever.
+    /// `None` means "still owed a notification" — the proactive-delivery sweep
+    /// (`recommendation_loop`'s notification pass) treats this as the thing to
+    /// check, not `status`, since `status` alone can't distinguish "brand new,
+    /// never notified" from "notified an hour ago, still sitting unread."
+    /// Snoozing resets this back to `None` (see `snoozed_until` below) so the
+    /// recommendation is treated as owing a fresh notification once the snooze
+    /// window passes, rather than staying permanently "already notified."
+    pub notified_at: Option<OffsetDateTime>,
+    /// Set by the snooze action (alongside the existing accept/dismiss
+    /// actions) to "come back to this later" — a temporary suppression of
+    /// notification, not a fourth `RecommendationStatus`. A snoozed
+    /// recommendation is still `Suggested`: it hasn't been acted on, it's just
+    /// not due for another notification until this timestamp passes. Modeling
+    /// snooze this way (rather than a new status variant) keeps every
+    /// existing `status = 'suggested'` query — "what's still outstanding?" —
+    /// correct without change, since a snoozed recommendation *is* still
+    /// outstanding.
+    pub snoozed_until: Option<OffsetDateTime>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

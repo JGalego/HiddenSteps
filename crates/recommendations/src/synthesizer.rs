@@ -159,6 +159,14 @@ impl<'a, P: LlmProvider + ?Sized> Synthesizer<'a, P> {
             generating_provider: self.provider.id().to_string(),
             status: RecommendationStatus::Suggested,
             dismissal_reason: None,
+            // A freshly-synthesized recommendation has never been notified
+            // about and is never born snoozed — both start `None`. The
+            // proactive-delivery sweep (`recommendation_loop` in the desktop
+            // app) is what populates `notified_at`, and the snooze action is
+            // what populates `snoozed_until`; synthesis itself knows about
+            // neither.
+            notified_at: None,
+            snoozed_until: None,
         })
     }
 }

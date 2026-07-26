@@ -31,6 +31,7 @@ vi.mock("./tauriBridge", () => ({
     getCloudConsent: vi.fn().mockResolvedValue(false),
     setRecommendationStatus: vi.fn(),
     getRecommendationDetail: vi.fn(),
+    snoozeRecommendation: vi.fn(),
   },
 }));
 
@@ -53,6 +54,8 @@ const sampleRecommendation: Recommendation = {
   generating_provider: "ollama",
   status: "suggested",
   dismissal_reason: null,
+  notified_at: null,
+  snoozed_until: null,
 };
 
 describe("accessibility (axe-core)", () => {

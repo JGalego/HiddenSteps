@@ -105,7 +105,25 @@ CREATE TABLE IF NOT EXISTS recommendations (
     ignored_information_json     TEXT NOT NULL,
     generating_provider          TEXT NOT NULL,
     status                       TEXT NOT NULL DEFAULT 'suggested' CHECK (status IN ('suggested', 'implemented', 'dismissed')),
-    dismissal_reason             TEXT
+    dismissal_reason             TEXT,
+    -- Proactive-delivery state. Both nullable, both added here directly to the
+    -- `CREATE TABLE IF NOT EXISTS` rather than via an `ALTER TABLE` migration
+    -- step — this schema has no released, installed base yet (see store.rs's
+    -- `migrate()`: schema.sql is re-applied in full on every open, and
+    -- `schema_version` exists for future use but has never had to reconcile
+    -- an old shape against a new one), so evolving the CREATE statement in
+    -- place is the same approach every other column in this file already
+    -- uses.
+    --
+    -- notified_at: when an OS notification was last sent for this
+    -- recommendation. NULL means "still owed one" — see
+    -- `Recommendation::notified_at`'s doc comment for why this, not `status`,
+    -- is what the notification sweep keys off of.
+    notified_at                  TEXT,
+    -- snoozed_until: set by the snooze action to suppress notification until
+    -- this time. Deliberately not a new `status` value — see
+    -- `Recommendation::snoozed_until`'s doc comment.
+    snoozed_until                TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_recommendations_pattern ON recommendations(pattern_id);
 

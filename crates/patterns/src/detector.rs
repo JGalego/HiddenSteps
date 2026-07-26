@@ -228,7 +228,18 @@ fn subject(event: &EventSummary) -> Option<Subject> {
                 value: format!("{operation}:{extension}"),
             })
         }
-        WindowTitle | AppActionEvent | OcrText | Screenshot | AccessibilityTree => None,
+        // Page titles get exactly the same treatment as window titles, for
+        // exactly the same reason (see this function's doc comment): both are
+        // free-text, high-cardinality strings that essentially never repeat
+        // verbatim across occurrences, so there is no low-cardinality
+        // "subject" to extract — the signature falls back to signal-type
+        // alone via `action_key`'s `None` branch.
+        WindowTitle
+        | BrowserPageTitleViewed
+        | AppActionEvent
+        | OcrText
+        | Screenshot
+        | AccessibilityTree => None,
     }
 }
 
@@ -253,6 +264,7 @@ fn signal_type_label(signal_type: hiddensteps_domain::SignalType) -> &'static st
         ShortcutUsed => "shortcut_used",
         AppActionEvent => "app_action_event",
         BrowserDomainVisited => "browser_domain_visited",
+        BrowserPageTitleViewed => "browser_page_title_viewed",
         ClipboardMetadata => "clipboard_metadata",
         FileOperationMetadata => "file_operation_metadata",
         OcrText => "ocr_text",
@@ -472,6 +484,53 @@ mod tests {
                     index as i64 + 1,
                 );
                 event.summary = serde_json::json!({"app": "slack.exe"});
+                event
+            })
+            .collect();
+        let detector = PatternDetector::new(1..=1, 3);
+        let detected = detector.detect(&events);
+        assert_eq!(detected.len(), 1);
+        assert!(!detected[0].contains_verbatim_strings);
+    }
+
+    #[test]
+    fn browser_page_title_action_key_falls_back_to_source_id_like_window_title() {
+        // Regression test for a real, formerly-uncaught bug: `SignalType`
+        // gained `BrowserPageTitleViewed` (the browser-extension bridge's
+        // Level-3 page-title signal) without either match in this file
+        // (`subject`, `signal_type_label`) being updated to cover it, so this
+        // whole crate failed to compile with a non-exhaustive-patterns error.
+        // Page titles get the same treatment as window titles per `subject`'s
+        // doc comment: free-text and high-cardinality, so no low-cardinality
+        // "subject" is extracted — the action key falls back to
+        // `source_id:signal_type_label`.
+        let event = event_at(0, "linux.browser", SignalType::BrowserPageTitleViewed, 1);
+        assert_eq!(
+            action_key(&event),
+            "linux.browser:browser_page_title_viewed"
+        );
+    }
+
+    #[test]
+    fn browser_page_title_pattern_is_not_flagged_as_verbatim() {
+        // Matches `app_focus_change_pattern_is_not_flagged_as_verbatim` above:
+        // `signature_contains_verbatim` only ever flagged `browser_domain_visited`
+        // (a plain domain), and page titles fall into the same
+        // no-subject/source_id-prefixed bucket as window titles, which were
+        // never flagged either — this documents that BrowserPageTitleViewed
+        // was deliberately given the same (pre-existing) treatment, not a new
+        // privacy-gating decision made here.
+        let events: Vec<EventSummary> = [0, 100, 200]
+            .into_iter()
+            .enumerate()
+            .map(|(index, start)| {
+                let mut event = event_at(
+                    start,
+                    "linux.browser",
+                    SignalType::BrowserPageTitleViewed,
+                    index as i64 + 1,
+                );
+                event.summary = serde_json::json!({"title": "Example Domain"});
                 event
             })
             .collect();

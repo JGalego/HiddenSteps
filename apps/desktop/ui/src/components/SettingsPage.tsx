@@ -14,6 +14,30 @@ import { acknowledgedPermissionsFor } from "../privacyLevels";
 // by string (e.g. `set_privacy_level`'s command name itself).
 const DEEP_MODE_SCREENSHOT_OCR_SETTING_KEY = "deep_mode_screenshot_ocr_enabled";
 
+// Kept in sync by hand with `recommendation_loop::NOTIFICATION_QUIET_HOURS_SETTING_KEY`
+// the same way the key above is kept in sync with its own Rust constant.
+// Value shape: `{ start_hour, end_hour }`, both 0-23, compared against the
+// current hour in UTC (see that Rust constant's doc comment for why UTC, not
+// wall-clock-local time) — recommendation_loop's notification sweep reads
+// this every tick and simply doesn't send a notification while the current
+// hour falls in this window, without losing or dropping the recommendation:
+// the very next sweep after quiet hours end sends it.
+const NOTIFICATION_QUIET_HOURS_SETTING_KEY = "notification_quiet_hours";
+
+interface QuietHours {
+  start_hour: number;
+  end_hour: number;
+}
+
+function isQuietHours(value: unknown): value is QuietHours {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as QuietHours).start_hour === "number" &&
+    typeof (value as QuietHours).end_hour === "number"
+  );
+}
+
 /**
  * docs/ux/05-settings-and-complexity-tiers.md's Privacy/AI-Provider sections.
  * Per that doc's closing design rule: privacy level is never tier-gated, so
@@ -28,23 +52,32 @@ export function SettingsPage() {
   const [cloudConsent, setCloudConsentState] = useState(false);
   const [deepModeScreenshotOcr, setDeepModeScreenshotOcr] = useState(false);
   const [browserBridge, setBrowserBridge] = useState<BrowserBridgeStatus | null>(null);
+  const [quietHours, setQuietHoursState] = useState<QuietHours | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
-      const [nextStatus, nextProviders, nextCloudConsent, nextDeepModeSetting, nextBrowserBridge] =
-        await Promise.all([
-          tauriBridge.getObservationStatus(),
-          tauriBridge.listLlmProviders(),
-          tauriBridge.getCloudConsent(),
-          tauriBridge.getSettings(DEEP_MODE_SCREENSHOT_OCR_SETTING_KEY),
-          tauriBridge.getBrowserBridgeStatus(),
-        ]);
+      const [
+        nextStatus,
+        nextProviders,
+        nextCloudConsent,
+        nextDeepModeSetting,
+        nextBrowserBridge,
+        nextQuietHours,
+      ] = await Promise.all([
+        tauriBridge.getObservationStatus(),
+        tauriBridge.listLlmProviders(),
+        tauriBridge.getCloudConsent(),
+        tauriBridge.getSettings(DEEP_MODE_SCREENSHOT_OCR_SETTING_KEY),
+        tauriBridge.getBrowserBridgeStatus(),
+        tauriBridge.getSettings(NOTIFICATION_QUIET_HOURS_SETTING_KEY),
+      ]);
       setStatus(nextStatus);
       setProviders(nextProviders);
       setCloudConsentState(nextCloudConsent);
       setDeepModeScreenshotOcr(nextDeepModeSetting === true);
       setBrowserBridge(nextBrowserBridge);
+      setQuietHoursState(isQuietHours(nextQuietHours) ? nextQuietHours : null);
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -79,6 +112,18 @@ export function SettingsPage() {
         DEEP_MODE_SCREENSHOT_OCR_SETTING_KEY,
         !deepModeScreenshotOcr
       );
+      await refresh();
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const updateQuietHours = async (startHour: number, endHour: number) => {
+    try {
+      await tauriBridge.updateSettings(NOTIFICATION_QUIET_HOURS_SETTING_KEY, {
+        start_hour: startHour,
+        end_hour: endHour,
+      });
       await refresh();
     } catch (e) {
       setError(String(e));
@@ -203,6 +248,44 @@ export function SettingsPage() {
             </p>
           </>
         )}
+      </div>
+
+      <div className="card section-block">
+        <h2>Notifications</h2>
+        <p>
+          Quiet hours (UTC): a new recommendation still gets generated as
+          usual during this window, but its OS notification is delayed until
+          quiet hours end rather than sent — nothing is lost, just deferred.
+          Set both hours the same to disable quiet hours entirely.
+        </p>
+        <p>
+          <label>
+            Start hour{" "}
+            <input
+              type="number"
+              min={0}
+              max={23}
+              aria-label="Quiet hours start"
+              value={quietHours?.start_hour ?? 22}
+              onChange={(e) =>
+                updateQuietHours(Number(e.target.value), quietHours?.end_hour ?? 7)
+              }
+            />
+          </label>{" "}
+          <label>
+            End hour{" "}
+            <input
+              type="number"
+              min={0}
+              max={23}
+              aria-label="Quiet hours end"
+              value={quietHours?.end_hour ?? 7}
+              onChange={(e) =>
+                updateQuietHours(quietHours?.start_hour ?? 22, Number(e.target.value))
+              }
+            />
+          </label>
+        </p>
       </div>
     </section>
   );

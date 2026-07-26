@@ -46,6 +46,11 @@ export interface Recommendation {
   generating_provider: string;
   status: "suggested" | "implemented" | "dismissed";
   dismissal_reason: string | null;
+  // When an OS notification was last sent for this recommendation, if ever.
+  notified_at: string | null;
+  // Set by the Snooze action — suppresses another notification until this
+  // time, without changing `status`. Still "suggested" while snoozed.
+  snoozed_until: string | null;
 }
 
 export interface Pattern {
@@ -207,6 +212,13 @@ export const tauriBridge = {
     invoke("set_recommendation_status", {
       request: { id, status, dismissal_reason: dismissalReason },
     }),
+
+  // Suppresses this recommendation's notification for `hours` (defaults to
+  // the backend's SNOOZE_DEFAULT_HOURS, a "remind me tomorrow" cadence, when
+  // omitted) without dismissing or implementing it — see
+  // `commands::snooze_recommendation`'s doc comment.
+  snoozeRecommendation: (id: number, hours?: number): Promise<boolean> =>
+    invoke("snooze_recommendation", { request: { id, hours } }),
 
   getCloudConsent: (): Promise<boolean> => invoke("get_cloud_consent"),
 

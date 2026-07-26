@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SettingsPage } from "./SettingsPage";
@@ -196,5 +196,49 @@ describe("SettingsPage", () => {
       "deep_mode_screenshot_ocr_enabled",
       true
     );
+  });
+
+  it("shows a default quiet-hours window when none is stored yet", async () => {
+    render(<SettingsPage />);
+    await screen.findByText("2");
+
+    expect(screen.getByLabelText("Quiet hours start")).toHaveValue(22);
+    expect(screen.getByLabelText("Quiet hours end")).toHaveValue(7);
+  });
+
+  it("shows the stored quiet-hours window once loaded", async () => {
+    mockedBridge.getSettings.mockImplementation((key: string) =>
+      key === "notification_quiet_hours"
+        ? Promise.resolve({ start_hour: 20, end_hour: 6 })
+        : Promise.resolve(false)
+    );
+    render(<SettingsPage />);
+    await screen.findByText("2");
+
+    expect(await screen.findByLabelText("Quiet hours start")).toHaveValue(20);
+    expect(screen.getByLabelText("Quiet hours end")).toHaveValue(6);
+  });
+
+  it("changing the quiet-hours start hour calls update_settings with the new range", async () => {
+    mockedBridge.getSettings.mockImplementation((key: string) =>
+      key === "notification_quiet_hours"
+        ? Promise.resolve({ start_hour: 22, end_hour: 7 })
+        : Promise.resolve(false)
+    );
+    render(<SettingsPage />);
+    const startInput = await screen.findByLabelText("Quiet hours start");
+
+    // A single synchronous `fireEvent.change` rather than `userEvent.type`'s
+    // keystroke-by-keystroke input: this component's inputs are controlled by
+    // state that only updates once the async update_settings + refresh round
+    // trip resolves, so typing digit-by-digit against a `value` prop that
+    // doesn't move in between is exactly the kind of race a real user typing
+    // quickly could also hit — not what this test is trying to exercise.
+    fireEvent.change(startInput, { target: { value: "23" } });
+
+    expect(mockedBridge.updateSettings).toHaveBeenCalledWith("notification_quiet_hours", {
+      start_hour: 23,
+      end_hour: 7,
+    });
   });
 });

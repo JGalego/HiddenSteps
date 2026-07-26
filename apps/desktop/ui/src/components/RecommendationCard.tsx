@@ -65,6 +65,20 @@ export function RecommendationCard({
     }
   };
 
+  // Alongside accept/dismiss: "not now, but don't drop it" — suppresses the
+  // next OS notification for this recommendation without dismissing it, so
+  // it doesn't count against the dismissal-backoff feedback loop the way a
+  // real Dismiss does.
+  const snooze = async () => {
+    try {
+      await tauriBridge.snoozeRecommendation(recommendation.id!);
+      setError(null);
+      onStatusChange?.();
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
   return (
     <article className="recommendation-card" aria-label={recommendation.title}>
       {error && (
@@ -154,6 +168,9 @@ export function RecommendationCard({
         </button>
         <button className="btn" type="button" onClick={() => dismiss("not worth the effort")}>
           Dismiss
+        </button>
+        <button className="btn" type="button" onClick={snooze}>
+          Snooze
         </button>
       </div>
     </article>

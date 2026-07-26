@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Least-privilege capability set for the main window. It grants only the core default permissions (IPC to this app's own commands, receiving Rust-emitted events). No filesystem, shell, HTTP, dialog, or other plugin capability is granted, because every privileged operation in HiddenSteps goes through its own #[tauri::command]s and Rust-side APIs — the webview has no legitimate need to reach the OS directly, and this file makes that scope explicit rather than relying on implicit defaults.",
+  "description": "Least-privilege capability set for the main window. It grants only the core default permissions (IPC to this app's own commands, receiving Rust-emitted events). No filesystem, shell, HTTP, dialog, or other plugin capability is granted, because every privileged operation in HiddenSteps goes through its own #[tauri::command]s and Rust-side APIs — the webview has no legitimate need to reach the OS directly, and this file makes that scope explicit rather than relying on implicit defaults. This includes tauri-plugin-notification: recommendation_loop.rs sends OS notifications straight from Rust via its NotificationExt trait (app.notification().builder()...show()), which never crosses the IPC boundary and so needs no invoke-permission grant at all — nothing here grants the webview 'notification:default' or any other notification permission, because the webview has no reachable command to use it with.",
   "windows": ["main"],
   "permissions": ["core:default"]
 }
