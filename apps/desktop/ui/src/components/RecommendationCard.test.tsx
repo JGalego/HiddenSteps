@@ -8,6 +8,7 @@ vi.mock("../tauriBridge", () => ({
   tauriBridge: {
     setRecommendationStatus: vi.fn(),
     getRecommendationDetail: vi.fn(),
+    snoozeRecommendation: vi.fn(),
   },
 }));
 
@@ -37,6 +38,8 @@ const sample: Recommendation = {
   generating_provider: "ollama",
   status: "suggested",
   dismissal_reason: null,
+  notified_at: null,
+  snoozed_until: null,
 };
 
 describe("RecommendationCard", () => {
@@ -127,6 +130,26 @@ describe("RecommendationCard", () => {
     render(<RecommendationCard recommendation={sample} />);
 
     await user.click(screen.getByRole("button", { name: "Mark implemented" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("store unavailable");
+  });
+
+  it("snoozing calls snooze_recommendation with this recommendation's id", async () => {
+    const user = userEvent.setup();
+    mockedBridge.snoozeRecommendation.mockResolvedValue(true);
+    render(<RecommendationCard recommendation={sample} />);
+
+    await user.click(screen.getByRole("button", { name: "Snooze" }));
+
+    expect(mockedBridge.snoozeRecommendation).toHaveBeenCalledWith(42);
+  });
+
+  it("shows an error rather than silently failing when snoozing fails", async () => {
+    const user = userEvent.setup();
+    mockedBridge.snoozeRecommendation.mockRejectedValueOnce(new Error("store unavailable"));
+    render(<RecommendationCard recommendation={sample} />);
+
+    await user.click(screen.getByRole("button", { name: "Snooze" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("store unavailable");
   });

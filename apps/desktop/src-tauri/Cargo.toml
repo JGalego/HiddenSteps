@@ -36,10 +36,18 @@ hiddensteps-plugin-host = { path = "../../../crates/plugin-host" }
 hiddensteps-observation = { path = "../../../crates/observation" }
 
 tauri = { version = "2", features = ["tray-icon"] }
+# Sends the OS-level notification `recommendation_loop`'s proactive-delivery
+# sweep shows when a new recommendation is ready (`NotificationExt`, called
+# straight from Rust — see that module's `send_pending_notifications`). Pinned
+# to the same major line as `tauri` itself (2.x); verified against the real
+# upstream source at tag `v2` in tauri-apps/plugins-workspace, since this
+# plugin has had real API churn across its own 1.x/2.x lines and guessing
+# would be worse than checking.
+tauri-plugin-notification = "2"
 async-trait = "0.1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
-time = { version = "0.3", features = ["serde"] }
+time = { version = "0.3", features = ["serde", "formatting"] }
 zeroize = "1"

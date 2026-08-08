@@ -38,6 +38,27 @@ jobs:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
+      # hiddensteps-observation's cross-platform `ScreenshotSource` (Level 4 /
+      # Deep-mode capture) depends on `xcap`, whose Linux backend unconditionally
+      # pulls in Wayland/PipeWire/GBM/EGL screen-recording support this source
+      # never uses (it only ever calls `capture_image`) — these `-dev` packages
+      # are needed to even *compile* `hiddensteps-observation` on Linux, so this
+      # must run before "Build workspace" below. Confirmed exactly this set is
+      # sufficient by a real local build against a fresh install of each package
+      # (see `crates/observation/src/screenshot.rs`'s doc comment) — no
+      # equivalent extra step is needed on macOS/Windows, where `xcap` only uses
+      # OS frameworks/SDK components already present on those runners.
+      - name: Install Linux system dependencies for hiddensteps-observation (screenshot capture)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libpipewire-0.3-dev \
+            libgbm-dev \
+            libwayland-dev \
+            libegl1-mesa-dev
+
       - name: Format check
         run: cargo fmt --check
 
@@ -130,6 +151,20 @@ jobs:
             librsvg2-dev \
             build-essential \
             curl wget file patchelf
+
+      # This crate depends on hiddensteps-observation, whose cross-platform
+      # `ScreenshotSource` needs these to even compile on Linux — see the
+      # `core` job's equivalent step above for why.
+      - name: Install Linux system dependencies for hiddensteps-observation (screenshot capture)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libpipewire-0.3-dev \
+            libgbm-dev \
+            libwayland-dev \
+            libegl1-mesa-dev
 
       - name: Build the UI (frontendDist for the Tauri build)
         working-directory: apps/desktop/ui

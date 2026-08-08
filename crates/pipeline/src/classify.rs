@@ -14,8 +14,11 @@ pub fn minimum_level_for(signal_type: SignalType) -> PrivacyLevel {
         | SignalType::BrowserDomainVisited
         | SignalType::ClipboardMetadata
         | SignalType::FileOperationMetadata => PrivacyLevel::WorkflowMetadata,
-        // Level 3 (ContextAware) doesn't yet have signal types exclusively its own
-        // in this implementation — see the module-level note in lib.rs.
+        // Level 3 (ContextAware)'s first signal type exclusively its own in this
+        // implementation — see the module-level note in lib.rs for the
+        // remaining Level-3 richer-context gap (in-app action detail,
+        // file-operation extension detail) this doesn't close.
+        SignalType::BrowserPageTitleViewed => PrivacyLevel::ContextAware,
         SignalType::OcrText | SignalType::Screenshot | SignalType::AccessibilityTree => {
             PrivacyLevel::MaximumAssistance
         }
@@ -62,6 +65,10 @@ pub fn classify(payload: CapturedPayload) -> ClassifiedSignal {
         CapturedPayload::BrowserDomainVisited { domain } => ClassifiedSignal::Fields {
             signal_type: SignalType::BrowserDomainVisited,
             fields: vec![("domain", FieldValue::Redactable(domain))],
+        },
+        CapturedPayload::BrowserPageTitleViewed { title } => ClassifiedSignal::Fields {
+            signal_type: SignalType::BrowserPageTitleViewed,
+            fields: vec![("title", FieldValue::Redactable(title))],
         },
         CapturedPayload::ClipboardMetadata {
             content_type,

@@ -553,8 +553,8 @@ impl SqlCipherEventStore {
                  estimated_time_saved_minutes, difficulty, maintenance_burden,
                  privacy_implications, implementation_effort, alternatives_json,
                  assumptions_json, ignored_information_json, generating_provider,
-                 status, dismissal_reason)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+                 status, dismissal_reason, notified_at, snoozed_until)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
             params![
                 rec.pattern_id,
                 to_rfc3339(rec.created_at),
@@ -573,6 +573,8 @@ impl SqlCipherEventStore {
                 rec.generating_provider,
                 recommendation_status_to_str(rec.status),
                 rec.dismissal_reason,
+                rec.notified_at.map(to_rfc3339),
+                rec.snoozed_until.map(to_rfc3339),
             ],
         )?;
         Ok(conn.last_insert_rowid())
@@ -592,6 +594,46 @@ impl SqlCipherEventStore {
         Ok(())
     }
 
+    /// Sets `notified_at`, marking an owed OS notification as sent — called by
+    /// the desktop app's notification sweep right after
+    /// `tauri_plugin_notification` actually shows one, never speculatively
+    /// before.
+    pub fn mark_recommendation_notified(
+        &self,
+        id: i64,
+        notified_at: OffsetDateTime,
+    ) -> Result<(), EventStoreError> {
+        let conn = self.conn.lock().expect("event store mutex poisoned");
+        conn.execute(
+            "UPDATE recommendations SET notified_at = ?1 WHERE id = ?2",
+            params![to_rfc3339(notified_at), id],
+        )?;
+        Ok(())
+    }
+
+    /// The snooze action: suppresses notification until `until`, and — this
+    /// is the important part, not just bookkeeping — clears `notified_at`
+    /// back to `None`. Without that, a recommendation notified once before
+    /// being snoozed would look permanently "already notified" and never
+    /// surface again once the snooze window passed; resetting it means
+    /// `list_recommendations_needing_notification` naturally picks this back
+    /// up the first sweep after `until`, with no separate "snooze just
+    /// expired" bookkeeping required. `status` is untouched — a snoozed
+    /// recommendation stays `Suggested` (see `Recommendation::snoozed_until`'s
+    /// doc comment).
+    pub fn snooze_recommendation(
+        &self,
+        id: i64,
+        until: OffsetDateTime,
+    ) -> Result<(), EventStoreError> {
+        let conn = self.conn.lock().expect("event store mutex poisoned");
+        conn.execute(
+            "UPDATE recommendations SET snoozed_until = ?1, notified_at = NULL WHERE id = ?2",
+            params![to_rfc3339(until), id],
+        )?;
+        Ok(())
+    }
+
     pub fn list_recommendations(
         &self,
         status_filter: Option<RecommendationStatus>,
@@ -601,7 +643,7 @@ impl SqlCipherEventStore {
                     estimated_time_saved_minutes, difficulty, maintenance_burden,
                     privacy_implications, implementation_effort, alternatives_json,
                     assumptions_json, ignored_information_json, generating_provider,
-                    status, dismissal_reason
+                    status, dismissal_reason, notified_at, snoozed_until
              FROM recommendations";
         let (sql, filter): (String, Option<&'static str>) = match status_filter {
             Some(status) => (
@@ -615,6 +657,63 @@ impl SqlCipherEventStore {
             Some(status) => stmt.query_map(params![status], row_to_recommendation)?,
             None => stmt.query_map([], row_to_recommendation)?,
         };
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(EventStoreError::from)
+    }
+
+    /// Every recommendation ever synthesized for one pattern, dismissed and
+    /// otherwise — the input to `recommendation_loop`'s dismissal-backoff
+    /// gate (how many times has this pattern's recommendation been turned
+    /// down, and is there already a live one). `pattern_id` is a stable proxy
+    /// for "same recurring pattern" here: `sweep_once` only ever creates a new
+    /// `patterns` row for a genuinely new `sequence_signature`, reusing the
+    /// same row (and so the same id) on every later sweep that re-detects the
+    /// same signature — so grouping by `pattern_id` is equivalent to grouping
+    /// by signature without re-deriving or storing the signature again here.
+    pub fn list_recommendations_for_pattern(
+        &self,
+        pattern_id: i64,
+    ) -> Result<Vec<Recommendation>, EventStoreError> {
+        let conn = self.conn.lock().expect("event store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, pattern_id, created_at, title, category, why, confidence,
+                    estimated_time_saved_minutes, difficulty, maintenance_burden,
+                    privacy_implications, implementation_effort, alternatives_json,
+                    assumptions_json, ignored_information_json, generating_provider,
+                    status, dismissal_reason, notified_at, snoozed_until
+             FROM recommendations WHERE pattern_id = ?1",
+        )?;
+        let rows = stmt.query_map(params![pattern_id], row_to_recommendation)?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(EventStoreError::from)
+    }
+
+    /// Recommendations the proactive-delivery sweep still owes a notification
+    /// for `now`: still `Suggested` (a dismissed or implemented recommendation
+    /// is done, nothing to notify about), never notified
+    /// (`notified_at IS NULL`), and not currently snoozed
+    /// (`snoozed_until` unset, or already in the past). Quiet-hours gating is
+    /// deliberately not part of this query — it's evaluated by the caller
+    /// against the *current* wall-clock hour (see
+    /// `recommendation_loop::is_within_quiet_hours`), which has nothing to do
+    /// with any one row's stored data.
+    pub fn list_recommendations_needing_notification(
+        &self,
+        now: OffsetDateTime,
+    ) -> Result<Vec<Recommendation>, EventStoreError> {
+        let conn = self.conn.lock().expect("event store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, pattern_id, created_at, title, category, why, confidence,
+                    estimated_time_saved_minutes, difficulty, maintenance_burden,
+                    privacy_implications, implementation_effort, alternatives_json,
+                    assumptions_json, ignored_information_json, generating_provider,
+                    status, dismissal_reason, notified_at, snoozed_until
+             FROM recommendations
+             WHERE status = 'suggested'
+               AND notified_at IS NULL
+               AND (snoozed_until IS NULL OR snoozed_until <= ?1)",
+        )?;
+        let rows = stmt.query_map(params![to_rfc3339(now)], row_to_recommendation)?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(EventStoreError::from)
     }
@@ -1048,6 +1147,8 @@ fn row_to_recommendation(row: &rusqlite::Row<'_>) -> rusqlite::Result<Recommenda
     let generating_provider: String = row.get(15)?;
     let status: String = row.get(16)?;
     let dismissal_reason: Option<String> = row.get(17)?;
+    let notified_at: Option<String> = row.get(18)?;
+    let snoozed_until: Option<String> = row.get(19)?;
 
     let alternatives: Vec<Alternative> = serde_json::from_value(parse_json(&alternatives_json)?)
         .map_err(|e| map_err(EventStoreError::Serialization(e)))?;
@@ -1076,6 +1177,14 @@ fn row_to_recommendation(row: &rusqlite::Row<'_>) -> rusqlite::Result<Recommenda
         generating_provider,
         status: recommendation_status_from_str(&status).map_err(map_err)?,
         dismissal_reason,
+        notified_at: notified_at
+            .map(|s| from_rfc3339(&s))
+            .transpose()
+            .map_err(map_err)?,
+        snoozed_until: snoozed_until
+            .map(|s| from_rfc3339(&s))
+            .transpose()
+            .map_err(map_err)?,
     })
 }
 
@@ -1571,6 +1680,8 @@ mod tests {
             generating_provider: "ollama".to_string(),
             status: RecommendationStatus::Suggested,
             dismissal_reason: None,
+            notified_at: None,
+            snoozed_until: None,
         }
     }
 
@@ -1615,6 +1726,138 @@ mod tests {
             recommendations[0].dismissal_reason.as_deref(),
             Some("not worth the effort")
         );
+    }
+
+    #[test]
+    fn notified_at_and_snoozed_until_round_trip_through_storage() {
+        let store = SqlCipherEventStore::open_in_memory(&test_key()).unwrap();
+        let pattern_id = store.insert_pattern(&sample_pattern()).unwrap();
+        let mut rec = sample_recommendation(pattern_id);
+        let notified_at = OffsetDateTime::now_utc() - time::Duration::hours(2);
+        let snoozed_until = OffsetDateTime::now_utc() + time::Duration::hours(22);
+        rec.notified_at = Some(notified_at);
+        rec.snoozed_until = Some(snoozed_until);
+        store.insert_recommendation(&rec).unwrap();
+
+        let stored = &store.list_recommendations(None).unwrap()[0];
+        // RFC3339 round-trips lose sub-second precision beyond what's stored
+        // as text, so compare via the same formatting the store itself uses
+        // rather than requiring bit-for-bit `OffsetDateTime` equality.
+        assert_eq!(
+            to_rfc3339(stored.notified_at.unwrap()),
+            to_rfc3339(notified_at)
+        );
+        assert_eq!(
+            to_rfc3339(stored.snoozed_until.unwrap()),
+            to_rfc3339(snoozed_until)
+        );
+    }
+
+    #[test]
+    fn a_freshly_synthesized_recommendation_is_owed_a_notification() {
+        let store = SqlCipherEventStore::open_in_memory(&test_key()).unwrap();
+        let pattern_id = store.insert_pattern(&sample_pattern()).unwrap();
+        store
+            .insert_recommendation(&sample_recommendation(pattern_id))
+            .unwrap();
+
+        let owed = store
+            .list_recommendations_needing_notification(OffsetDateTime::now_utc())
+            .unwrap();
+        assert_eq!(owed.len(), 1);
+    }
+
+    #[test]
+    fn marking_a_recommendation_notified_removes_it_from_the_owed_list() {
+        let store = SqlCipherEventStore::open_in_memory(&test_key()).unwrap();
+        let pattern_id = store.insert_pattern(&sample_pattern()).unwrap();
+        let id = store
+            .insert_recommendation(&sample_recommendation(pattern_id))
+            .unwrap();
+
+        let now = OffsetDateTime::now_utc();
+        store.mark_recommendation_notified(id, now).unwrap();
+
+        assert!(store
+            .list_recommendations_needing_notification(now)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn snoozing_suppresses_notification_until_the_snooze_window_passes() {
+        let store = SqlCipherEventStore::open_in_memory(&test_key()).unwrap();
+        let pattern_id = store.insert_pattern(&sample_pattern()).unwrap();
+        let id = store
+            .insert_recommendation(&sample_recommendation(pattern_id))
+            .unwrap();
+
+        let now = OffsetDateTime::now_utc();
+        let snooze_until = now + time::Duration::hours(24);
+        store.snooze_recommendation(id, snooze_until).unwrap();
+
+        // Still within the snooze window: not owed a notification yet.
+        assert!(store
+            .list_recommendations_needing_notification(now)
+            .unwrap()
+            .is_empty());
+
+        // Once the snooze window has passed: owed again.
+        let after_snooze = snooze_until + time::Duration::minutes(1);
+        let owed = store
+            .list_recommendations_needing_notification(after_snooze)
+            .unwrap();
+        assert_eq!(owed.len(), 1);
+    }
+
+    #[test]
+    fn snoozing_an_already_notified_recommendation_makes_it_owed_again_after_the_window() {
+        // Regression scenario for the real bug this design avoids: without
+        // clearing `notified_at` on snooze, a recommendation notified once
+        // and then snoozed would look permanently "already notified" and
+        // never surface again once the snooze window passed.
+        let store = SqlCipherEventStore::open_in_memory(&test_key()).unwrap();
+        let pattern_id = store.insert_pattern(&sample_pattern()).unwrap();
+        let id = store
+            .insert_recommendation(&sample_recommendation(pattern_id))
+            .unwrap();
+
+        let now = OffsetDateTime::now_utc();
+        store.mark_recommendation_notified(id, now).unwrap();
+        assert!(store
+            .list_recommendations_needing_notification(now)
+            .unwrap()
+            .is_empty());
+
+        let snooze_until = now + time::Duration::hours(24);
+        store.snooze_recommendation(id, snooze_until).unwrap();
+
+        let after_snooze = snooze_until + time::Duration::minutes(1);
+        let owed = store
+            .list_recommendations_needing_notification(after_snooze)
+            .unwrap();
+        assert_eq!(owed.len(), 1);
+        assert_eq!(owed[0].notified_at, None);
+    }
+
+    #[test]
+    fn list_recommendations_for_pattern_only_returns_that_patterns_recommendations() {
+        let store = SqlCipherEventStore::open_in_memory(&test_key()).unwrap();
+        let pattern_a = store.insert_pattern(&sample_pattern()).unwrap();
+        let pattern_b = store.insert_pattern(&sample_pattern()).unwrap();
+        store
+            .insert_recommendation(&sample_recommendation(pattern_a))
+            .unwrap();
+        store
+            .insert_recommendation(&sample_recommendation(pattern_a))
+            .unwrap();
+        store
+            .insert_recommendation(&sample_recommendation(pattern_b))
+            .unwrap();
+
+        let for_a = store.list_recommendations_for_pattern(pattern_a).unwrap();
+        assert_eq!(for_a.len(), 2);
+        assert!(for_a.iter().all(|r| r.pattern_id == pattern_a));
     }
 
     #[test]

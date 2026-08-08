@@ -44,6 +44,27 @@ pub(crate) fn log_audit(store: &hiddensteps_event_store::SqlCipherEventStore, en
 /// launch rather than carried across restarts as separate state).
 pub const CLOUD_CONSENT_SETTING_KEY: &str = "cloud_consent_general";
 
+/// Whether the user has separately opted into Level 4's screenshot+OCR
+/// capture (`hiddensteps_observation::ScreenshotSource` +
+/// `hiddensteps_pipeline::OcrsTextExtractor`), per
+/// `docs/design/05-privacy-model.md` §1's requirement that each Level-4
+/// sub-capability be "explicit, separately-opted-in... each independently
+/// toggleable" rather than bundled into the coarse level-4 selection alone.
+/// `observation_loop` reads this every tick (alongside the current privacy
+/// level) before ever calling `poll` on the screenshot source — turning this
+/// off stops capture immediately, without needing a privacy-level change or
+/// an app restart.
+pub const DEEP_MODE_SCREENSHOT_OCR_SETTING_KEY: &str = "deep_mode_screenshot_ocr_enabled";
+
+/// The settings-table key `observation_loop::resolve_browser_bridge_token`
+/// persists the browser-extension pairing token under — generated once, on
+/// first run, before this app's Tauri builder even starts (see that
+/// function's doc comment). Not on `ALLOWED_SETTING_KEYS` below: unlike
+/// `DEEP_MODE_SCREENSHOT_OCR_SETTING_KEY`, there's no legitimate reason for
+/// the UI to *write* this key through the generic settings commands — only
+/// read it, via the dedicated `get_browser_bridge_status` below.
+pub const BROWSER_BRIDGE_TOKEN_SETTING_KEY: &str = "browser_bridge_token";
+
 // --- Onboarding & setup ---
 
 #[tauri::command]
@@ -401,6 +422,67 @@ pub async fn acknowledge_privacy_manifest(state: State<'_, AppState>) -> Result<
     Ok(true)
 }
 
+/// What Settings shows for the browser-extension bridge
+/// (`hiddensteps_observation::BrowserBridgeSource`): the pairing token and
+/// port the extension's options page needs, plus a best-effort read on
+/// whether it looks like the extension is actually reaching this app.
+#[derive(Serialize)]
+pub struct BrowserBridgeStatus {
+    pub token: String,
+    pub port: u16,
+    /// When a `browser_bridge.extension`-sourced event was last recorded, if
+    /// ever. `None` doesn't necessarily mean the extension has never
+    /// connected — see `receiving_data`'s doc comment for the same caveat.
+    pub last_seen: Option<OffsetDateTime>,
+    /// Derived, not tracked live: true when `last_seen` falls within a short
+    /// recency window. This is a real, measured signal (an actual persisted
+    /// event, the same `get_diagnostics` "real, measured data" standard
+    /// applies) but an approximate one — a paired extension that's simply
+    /// had no tab change in the last few minutes (or is capturing only a
+    /// signal type the current privacy level doesn't allow yet) will show as
+    /// not-yet-receiving here even though it's correctly paired and idle,
+    /// not broken. A live connection tracker (the bridge's HTTP server
+    /// reporting "request received at T" independent of whether that request
+    /// produced a storable event) would be more precise and is a reasonable
+    /// follow-up, not attempted here to avoid threading a second piece of
+    /// live cross-task state through `AppState` for what recent-event
+    /// recency already answers well enough for a status display.
+    pub receiving_data: bool,
+}
+
+#[tauri::command]
+pub async fn get_browser_bridge_status(
+    state: State<'_, AppState>,
+) -> Result<BrowserBridgeStatus, String> {
+    let token = state
+        .store
+        .get_setting(BROWSER_BRIDGE_TOKEN_SETTING_KEY)
+        .map_err(to_err)?
+        .and_then(|v| v.as_str().map(str::to_string))
+        .unwrap_or_default();
+
+    // A bounded recent-events scan, not a dedicated "last event per source"
+    // query — `EventStore` has no such lookup today (see this function's own
+    // `receiving_data` doc comment on the resulting approximation), and
+    // adding one is more schema/API surface than a status display needs.
+    let recent = state.store.list_recent_events(50).map_err(to_err)?;
+    let last_seen = recent
+        .iter()
+        .filter(|e| e.source_id == hiddensteps_observation::BrowserBridgeSource::SOURCE_ID)
+        .map(|e| e.occurred_at)
+        .max();
+    let receiving_data = last_seen
+        .map(|seen_at| OffsetDateTime::now_utc() - seen_at < time::Duration::minutes(5))
+        .unwrap_or(false);
+
+    Ok(BrowserBridgeStatus {
+        token,
+        port: hiddensteps_observation::BrowserBridgeSource::DEFAULT_PORT,
+        last_seen,
+        receiving_data,
+    })
+}
+
 #[tauri::command]
 pub async fn pause_observation(app: AppHandle, state: State<'_, AppState>) -> Result<bool, String> {
     let mut current = state.store.get_privacy_state().map_err(to_err)?;
@@ -569,6 +651,81 @@ pub async fn set_recommendation_status(
     Ok(true)
 }
 
+/// Default "remind me tomorrow"-style snooze length, used whenever the caller
+/// doesn't supply its own `hours`. A day is long enough to be a genuine
+/// deferral (not "snooze" as a five-minute-later nag) while still coming back
+/// on a predictable, short cadence — matching the accept/dismiss actions this
+/// sits alongside on `RecommendationCard`, neither of which needs a
+/// configurable duration either.
+const SNOOZE_DEFAULT_HOURS: i64 = 24;
+
+/// A hard ceiling on the caller-supplied `hours`, independent of the default
+/// above — about 5 years. `request.hours` crosses the IPC boundary as a plain
+/// `i64` with no other bound on it; without clamping, a large-enough value
+/// passed to `time::Duration::hours` and then added to `OffsetDateTime` could
+/// overflow the representable date range and panic instead of returning a
+/// normal error. Nothing in the shipped UI ever sends more than
+/// `SNOOZE_DEFAULT_HOURS`, so this only ever matters for a future or
+/// misbehaving caller.
+const SNOOZE_MAX_HOURS: i64 = 24 * 365 * 5;
+
+#[derive(Deserialize)]
+pub struct SnoozeRecommendationRequest {
+    pub id: i64,
+    /// How many hours to snooze for. `None` or non-positive falls back to
+    /// `SNOOZE_DEFAULT_HOURS` — the UI's "Snooze" button doesn't need to ask
+    /// the user to pick a duration, but a future caller (or a richer UI) that
+    /// wants a specific one still can. Clamped to `SNOOZE_MAX_HOURS`.
+    pub hours: Option<i64>,
+}
+
+/// The snooze action alongside the existing accept ("implemented")/dismiss
+/// actions: suppresses this recommendation's notification until the snooze
+/// window passes, without dismissing or implementing it — it's still
+/// `Suggested`, just not due for another notification yet. See
+/// `EventStore::snooze_recommendation`'s doc comment for why this also resets
+/// `notified_at`, and `recommendation_loop`'s sweep for what actually
+/// respects `snoozed_until` on the delivery side.
+#[tauri::command]
+pub async fn snooze_recommendation(
+    state: State<'_, AppState>,
+    request: SnoozeRecommendationRequest,
+) -> Result<bool, String> {
+    let hours = request
+        .hours
+        .filter(|hours| *hours > 0)
+        .unwrap_or(SNOOZE_DEFAULT_HOURS)
+        .min(SNOOZE_MAX_HOURS);
+    let until = OffsetDateTime::now_utc() + time::Duration::hours(hours);
+
+    state
+        .store
+        .snooze_recommendation(request.id, until)
+        .map_err(to_err)?;
+
+    log_audit(
+        &state.store,
+        AuditEntry::new(
+            AuditActor::User,
+            "recommendation_snoozed",
+            // Formatted explicitly as RFC3339 text rather than relying on
+            // `OffsetDateTime`'s own `Serialize` impl inside `json!` — with
+            // just the `serde` feature (no `serde-human-readable`), `time`'s
+            // default representation is a compact non-string encoding, not
+            // an ISO string, which would be an odd, hard-to-read outlier
+            // among this audit log's otherwise-plain-text `details_json`
+            // entries.
+            serde_json::json!({
+                "id": request.id,
+                "snoozed_until": until
+                    .format(&time::format_description::well_known::Rfc3339)
+                    .unwrap_or_default(),
+            }),
+        ),
+    );
+    Ok(true)
+}
+
 // --- Cloud dispatch consent ---
 
 /// Whether the user has granted general consent for pattern summaries to be
@@ -621,7 +778,11 @@ pub async fn set_cloud_consent(state: State<'_, AppState>, granted: bool) -> Res
 /// treat as trusted, like cloud-consent. Every key a UI legitimately needs
 /// belongs on this list; anything else is a bug or an attempt to reach
 /// somewhere it shouldn't, and is rejected rather than silently served.
-const ALLOWED_SETTING_KEYS: &[&str] = &[CLOUD_CONSENT_SETTING_KEY];
+const ALLOWED_SETTING_KEYS: &[&str] = &[
+    CLOUD_CONSENT_SETTING_KEY,
+    DEEP_MODE_SCREENSHOT_OCR_SETTING_KEY,
+    crate::recommendation_loop::NOTIFICATION_QUIET_HOURS_SETTING_KEY,
+];
 
 fn check_setting_key(key: &str) -> Result<(), String> {
     if ALLOWED_SETTING_KEYS.contains(&key) {

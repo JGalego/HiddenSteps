@@ -24,6 +24,18 @@ impl TextExtractor for NoTextExtraction {
     }
 }
 
+/// Lets a caller that only knows *at runtime* which `TextExtractor` it has
+/// (e.g. `apps/desktop/src-tauri`'s `observation_loop`, which picks
+/// `hiddensteps_pipeline::OcrsTextExtractor` if its OCR models are available
+/// and falls back to `NoTextExtraction` otherwise) build a single
+/// `EventPipeline<Box<dyn TextExtractor>>` instead of needing two differently-
+/// typed `EventPipeline`s and a branch at every call site that uses one.
+impl<T: TextExtractor + ?Sized> TextExtractor for Box<T> {
+    fn extract(&self, raw_bytes: &[u8]) -> Option<String> {
+        (**self).extract(raw_bytes)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DropReason {
     /// The Redaction Engine found an ambiguous (not high-confidence) match and,
@@ -199,6 +211,76 @@ mod tests {
             outcome,
             PipelineOutcome::Dropped(DropReason::SignalNotAllowedAtCurrentLevel)
         ));
+    }
+
+    #[test]
+    fn browser_domain_is_summarized_at_workflow_metadata_level() {
+        // `BrowserDomainVisited` -> `SignalType::BrowserDomainVisited`, which
+        // `minimum_level_for` maps to `WorkflowMetadata` (Level 2) — the
+        // classify-stage wiring `BrowserBridgeSource` depends on.
+        let pipeline = EventPipeline::new();
+        let outcome = pipeline.process(
+            signal(
+                "browser_bridge.extension",
+                CapturedPayload::BrowserDomainVisited {
+                    domain: "example.com".to_string(),
+                },
+            ),
+            PrivacyLevel::WorkflowMetadata,
+            OffsetDateTime::now_utc(),
+        );
+        match outcome {
+            PipelineOutcome::Summarized(event) => {
+                assert_eq!(event.summary["domain"], "example.com");
+            }
+            PipelineOutcome::Dropped(reason) => panic!("expected Summarized, got {reason:?}"),
+        }
+    }
+
+    #[test]
+    fn browser_page_title_requires_context_aware_not_just_workflow_metadata() {
+        // `BrowserPageTitleViewed` -> `SignalType::BrowserPageTitleViewed`,
+        // which `minimum_level_for` maps to `ContextAware` (Level 3) — one
+        // level above its sibling `BrowserDomainVisited` signal, per
+        // `docs/design/05-privacy-model.md` §1. Supplying Level 2
+        // (`WorkflowMetadata`) must drop it even though the *source* that
+        // produced it is allowed to run at Level 2.
+        let pipeline = EventPipeline::new();
+        let outcome = pipeline.process(
+            signal(
+                "browser_bridge.extension",
+                CapturedPayload::BrowserPageTitleViewed {
+                    title: "Example Domain".to_string(),
+                },
+            ),
+            PrivacyLevel::WorkflowMetadata,
+            OffsetDateTime::now_utc(),
+        );
+        assert!(matches!(
+            outcome,
+            PipelineOutcome::Dropped(DropReason::SignalNotAllowedAtCurrentLevel)
+        ));
+    }
+
+    #[test]
+    fn browser_page_title_is_summarized_at_context_aware_level() {
+        let pipeline = EventPipeline::new();
+        let outcome = pipeline.process(
+            signal(
+                "browser_bridge.extension",
+                CapturedPayload::BrowserPageTitleViewed {
+                    title: "Example Domain".to_string(),
+                },
+            ),
+            PrivacyLevel::ContextAware,
+            OffsetDateTime::now_utc(),
+        );
+        match outcome {
+            PipelineOutcome::Summarized(event) => {
+                assert_eq!(event.summary["title"], "Example Domain");
+            }
+            PipelineOutcome::Dropped(reason) => panic!("expected Summarized, got {reason:?}"),
+        }
     }
 
     #[test]

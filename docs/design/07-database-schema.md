@@ -113,7 +113,9 @@ CREATE TABLE recommendations (
     ignored_information_json     TEXT NOT NULL,     -- explainability: "what was intentionally ignored"
     generating_provider          TEXT NOT NULL,     -- which LlmProvider produced the synthesis
     status                       TEXT NOT NULL DEFAULT 'suggested' CHECK (status IN ('suggested', 'implemented', 'dismissed')),
-    dismissal_reason             TEXT
+    dismissal_reason             TEXT,
+    notified_at                  TEXT,              -- when an OS notification was last sent; NULL means still owed one
+    snoozed_until                TEXT               -- suppresses notification until this time; status stays 'suggested' while snoozed
 );
 CREATE INDEX idx_recommendations_pattern ON recommendations(pattern_id);
 

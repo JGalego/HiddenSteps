@@ -4,7 +4,29 @@
 /// actually gates observation on a user re-consenting once this changes; a
 /// bump with no caller checking it would be exactly as inert as this
 /// constant's absence was before.
-pub const CURRENT_MANIFEST_VERSION: i64 = 1;
+///
+/// Bumped 1 -> 2: Level 4 ("Maximum assistance") gained its first real
+/// capture capability — `hiddensteps_observation::ScreenshotSource` plus
+/// `hiddensteps_pipeline::OcrsTextExtractor` (screenshot + OCR). Before this,
+/// Level 4 was a documented, consentable privacy level that captured nothing
+/// at all; anyone who already consented to it consented to a manifest that
+/// didn't yet describe an actual screen-content capture, so this bump forces
+/// a fresh, accurate re-consent for exactly the users this newly affects —
+/// per `docs/design/05-privacy-model.md` §5's rule that a manifest change
+/// requires re-consent from anyone on the affected level, not just new users.
+///
+/// Bumped 2 -> 3: Levels 2 and 3 gained their first real browser-activity
+/// capture capability — `hiddensteps_observation::BrowserBridgeSource`
+/// (`CapturedPayload::BrowserDomainVisited` at Level 2,
+/// `CapturedPayload::BrowserPageTitleViewed` at Level 3), fed by a new
+/// browser-extension component (`apps/browser-extension`) rather than
+/// inferred from a window title as before. Before this, both levels were
+/// documented, consentable manifest entries that this implementation never
+/// actually produced — same situation as Level 4 pre-bump-2 — so anyone
+/// already on Level 2 or 3 consented to a manifest that didn't yet describe
+/// real domain/title capture, and needs the same fresh, accurate re-consent
+/// this bump forces for exactly those two levels.
+pub const CURRENT_MANIFEST_VERSION: i64 = 3;
 
 /// Per `docs/design/05-privacy-model.md` §5: each privacy level's signal manifest
 /// is versioned. If a future release changes what a level captures, the affected

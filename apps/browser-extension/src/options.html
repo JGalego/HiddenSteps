@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>HiddenSteps Companion — Setup</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 40rem;
+        margin: 2rem auto;
+        padding: 0 1rem;
+      }
+      label {
+        display: block;
+        margin: 0.75rem 0 0.25rem;
+        font-weight: 600;
+      }
+      input {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 0.4rem;
+        font-family: monospace;
+      }
+      button {
+        margin-top: 1rem;
+        margin-right: 0.5rem;
+        padding: 0.4rem 1rem;
+      }
+      #result {
+        margin-top: 1rem;
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>HiddenSteps Companion</h1>
+    <p>
+      This extension reports the active tab's domain (and, at higher privacy
+      levels, its page title) to the HiddenSteps desktop app running on this
+      same machine. It never sends the full page URL, path, query string, or
+      page content.
+    </p>
+    <p>
+      Open the HiddenSteps desktop app's Settings page, find the
+      "Browser Extension" section, and paste the pairing token shown there
+      below.
+    </p>
+    <label for="token">Pairing token</label>
+    <input id="token" type="text" autocomplete="off" spellcheck="false" />
+
+    <label for="port">Bridge port</label>
+    <input id="port" type="number" min="1" max="65535" />
+
+    <button id="save" type="button">Save</button>
+    <button id="test" type="button">Test connection</button>
+    <p id="result" role="status"></p>
+
+    <script type="module" src="options.js"></script>
+  </body>
+</html>
